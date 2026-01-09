@@ -1,0 +1,34 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Základní nastavení",
+        "description": "Zadejte název místnosti",
+        "data": {
+          "room_name": "Název místnosti"
+        }
+      },
+      "entities": {
+        "title": "Povinné entity",
+        "description": "Vyberte povinné entity",
+        "data": {
+          "temperature_entity": "Senzor teploty",
+          "target_entity": "Cílová teplota",
+          "trv_entities": "TRV hlavice",
+          "heating_water_temp_entity": "Teplota topné vody"
+        }
+      },
+      "optional": {
+        "title": "Volitelné entity",
+        "description": "Volitelné entity a parametry",
+        "data": {
+          "window_entities": "Okna",
+          "door_entities": "Dveře",
+          "hysteresis": "Hystereze (°C)",
+          "vent_delay": "Zpoždění větrání (s)",
+          "post_vent_duration": "Trvání post-ventilace (s)"
+        }
+      }
+    }
+  }
+}
