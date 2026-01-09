@@ -106,6 +106,15 @@ class RoomController:
         # 1. Načti aktuální hodnoty
         temp = self._get_temperature()
         target = self._get_target()
+        
+        # Pokud ještě nejsou data, skipnout tento cyklus
+        if temp is None or target is None:
+            _LOGGER.debug(
+                f"TRV [{self._room_name}]: Čekám na data "
+                f"(temp={temp}, target={target}), skipuji update"
+            )
+            return
+        
         window_open = self._any_window_open()
         
         # Uložit do historie pro adaptivní učení
@@ -318,6 +327,14 @@ class RoomController:
         first_trv = active_trvs[0]["entity"]
         trv_local_temp = self._get_trv_local_temperature(first_trv)
         
+        # Pokud není TRV teplota dostupná, skip tento update
+        if trv_local_temp is None:
+            _LOGGER.debug(
+                f"TRV [{self._room_name}]: TRV local temperature not available, "
+                f"skipping proportional heating setup"
+            )
+            return
+        
         # Vypočítat cílovou teplotu
         target_temp = self._calculate_proportional_target(
             room_temp, desired_temp, trv_local_temp
@@ -354,24 +371,33 @@ class RoomController:
         
         self._commands_total += active_count
 
-    def _get_temperature(self) -> float:
+    def _get_temperature(self) -> float | None:
         """Načte aktuální teplotu."""
         state = self._hass.states.get(self._temperature_entity)
-        if state is None or state.state in ("unknown", "unavailable"):
+        
+        if state is None:
             _LOGGER.warning(
+                f"TRV [{self._room_name}]: Temperature entity "
+                f"{self._temperature_entity} ještě neexistuje (možná se načítá)"
+            )
+            return None
+        
+        if state.state in ("unknown", "unavailable"):
+            _LOGGER.debug(
                 f"TRV [{self._room_name}]: Temperature entity "
                 f"{self._temperature_entity} unavailable"
             )
-            return 0.0
+            return None
+        
         try:
             return float(state.state)
         except (ValueError, TypeError):
             _LOGGER.error(
                 f"TRV [{self._room_name}]: Cannot parse temperature: {state.state}"
             )
-            return 0.0
+            return None
     
-    def _get_trv_local_temperature(self, entity_id: str) -> float:
+    def _get_trv_local_temperature(self, entity_id: str) -> float | None:
         """
         Načte lokální teplotu z TRV hlavice.
         
@@ -382,12 +408,12 @@ class RoomController:
             Lokální teplota měřená TRV hlavicí
         """
         state = self._hass.states.get(entity_id)
+        
         if state is None:
-            _LOGGER.warning(
-                f"TRV [{self._room_name}]: TRV entity {entity_id} not found"
+            _LOGGER.debug(
+                f"TRV [{self._room_name}]: TRV entity {entity_id} ještě neexistuje"
             )
-            # Fallback na pokojovou teplotu
-            return self._get_temperature()
+            return None
         
         # Zkusit získat current_temperature z atributů
         trv_temp = state.attributes.get("current_temperature")
@@ -411,22 +437,31 @@ class RoomController:
             )
             return self._get_temperature()
 
-    def _get_target(self) -> float:
+    def _get_target(self) -> float | None:
         """Načte cílovou teplotu."""
         state = self._hass.states.get(self._target_entity)
-        if state is None or state.state in ("unknown", "unavailable"):
+        
+        if state is None:
             _LOGGER.warning(
                 f"TRV [{self._room_name}]: Target entity "
-                f"{self._target_entity} unavailable, using default 20.0"
+                f"{self._target_entity} ještě neexistuje (možná se načítá)"
             )
-            return 20.0
+            return None
+        
+        if state.state in ("unknown", "unavailable"):
+            _LOGGER.debug(
+                f"TRV [{self._room_name}]: Target entity "
+                f"{self._target_entity} unavailable"
+            )
+            return None
+        
         try:
             return float(state.state)
         except (ValueError, TypeError):
             _LOGGER.error(
                 f"TRV [{self._room_name}]: Cannot parse target: {state.state}"
             )
-            return 20.0
+            return None
 
     def _any_window_open(self) -> bool:
         """Kontroluje, zda je nějaké okno otevřené."""
@@ -502,6 +537,14 @@ class RoomController:
         # Použít první TRV pro získání lokální teploty
         first_trv = active_trvs[0]["entity"]
         trv_local_temp = self._get_trv_local_temperature(first_trv)
+        
+        # Pokud není TRV teplota, skip
+        if trv_local_temp is None:
+            _LOGGER.debug(
+                f"TRV [{self._room_name}]: TRV local temperature not available, "
+                f"skipping proportional update"
+            )
+            return
         
         # Vypočítat nový target
         new_target = self._calculate_proportional_target(

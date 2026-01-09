@@ -22,5 +22,14 @@ class TrvRegulatorCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self):
         """Volá se periodicky + při změně tracked entit."""
-        await self.room.async_update()
-        return {"state": self.room.state}
+        try:
+            await self.room.async_update()
+            
+            # NELOGOVAT každý update (zbytečný spam)
+            # Důležité věci se logují v room_controller.py
+            
+            return {"state": self.room.state}
+        except Exception as err:
+            # Chyby ANO logovat
+            _LOGGER.error(f"Error fetching TRV Regulator data: {err}")
+            raise
