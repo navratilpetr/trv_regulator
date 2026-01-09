@@ -26,7 +26,10 @@
           "door_entities": "Dveře",
           "hysteresis": "Hystereze (°C)",
           "vent_delay": "Zpoždění větrání (s)",
-          "post_vent_duration": "Trvání post-ventilace (s)"
+          "post_vent_duration": "Trvání post-ventilace (s)",
+          "gain": "Proporcionální zesílení (gain, 10-80)",
+          "offset": "Offset (-3.0 až +3.0)",
+          "adaptive_learning": "Aktivovat adaptivní učení"
         }
       }
     }
