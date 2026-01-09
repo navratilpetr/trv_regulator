@@ -263,7 +263,7 @@ class RoomController:
                 {
                     "entity_id": entity_id,
                     "hvac_mode": mode,
-                    "temperature": temp
+                    "temperature": round(temp, 1)
                 },
                 blocking=True,
             )
@@ -312,7 +312,7 @@ class RoomController:
                 {
                     "entity_id": entity_id,
                     "hvac_mode": "heat",
-                    "temperature": target_temp
+                    "temperature": round(target_temp, 1)
                 },
                 blocking=True,
             )
