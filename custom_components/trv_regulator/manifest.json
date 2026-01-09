@@ -1,0 +1,12 @@
+{
+  "domain": "trv_regulator",
+  "name": "TRV Regulator",
+  "version": "1.0.0",
+  "documentation": "https://github.com/navratilpetr/trv_regulator",
+  "issue_tracker": "https://github.com/navratilpetr/trv_regulator/issues",
+  "requirements": [],
+  "dependencies": [],
+  "codeowners": ["@navratilpetr"],
+  "config_flow": true,
+  "iot_class": "calculated"
+}
