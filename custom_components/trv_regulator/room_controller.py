@@ -138,7 +138,7 @@ class RoomController:
         _LOGGER.debug(
             f"TRV [{self._room_name}]: Temperature {temp:.1f}°C "
             f"within hysteresis ({lower_threshold:.1f}-{upper_threshold:.1f}°C) "
-            f"→ staying in {self._state}"
+            f"→ staying in {self._state.upper()}"
         )
         return self._state  # Zůstat v aktuálním stavu
 
