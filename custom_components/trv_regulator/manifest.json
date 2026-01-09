@@ -1,7 +1,7 @@
 {
   "domain": "trv_regulator",
   "name": "TRV Regulator",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "documentation": "https://github.com/navratilpetr/trv_regulator",
   "issue_tracker": "https://github.com/navratilpetr/trv_regulator/issues",
   "requirements": [],
