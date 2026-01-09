@@ -50,7 +50,7 @@ class TrvRegulatorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     ),
                     vol.Required("target_entity"): selector.EntitySelector(
                         selector.EntitySelectorConfig(
-                            domain=["input_number", "number", "climate"]
+                            domain=["input_number", "number", "climate", "sensor"]
                         )
                     ),
                     vol.Required("trv_entities"): selector.EntitySelector(
