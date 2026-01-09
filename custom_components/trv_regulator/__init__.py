@@ -5,7 +5,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_track_state_change_event
 
-from .const import DOMAIN
+from .const import DOMAIN, DEFAULT_GAIN, DEFAULT_OFFSET, DEFAULT_ADAPTIVE_LEARNING
 from .coordinator import TrvRegulatorCoordinator
 from .room_controller import RoomController
 
@@ -32,6 +32,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hysteresis=entry.data.get("hysteresis", 0.3),
         vent_delay=entry.data.get("vent_delay", 120),
         post_vent_duration=entry.data.get("post_vent_duration", 300),
+        gain=entry.data.get("gain", DEFAULT_GAIN),
+        offset=entry.data.get("offset", DEFAULT_OFFSET),
+        adaptive_learning=entry.data.get("adaptive_learning", DEFAULT_ADAPTIVE_LEARNING),
     )
 
     # Vytvoř coordinator
@@ -59,10 +62,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
+    # Forward setup pro sensor platform
+    await hass.config_entries.async_forward_entry_setups(entry, ["sensor"])
+
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Odinstalace integrace."""
-    hass.data[DOMAIN].pop(entry.entry_id)
-    return True
+    # Unload sensor platform
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, ["sensor"])
+    
+    if unload_ok:
+        hass.data[DOMAIN].pop(entry.entry_id)
+    
+    return unload_ok

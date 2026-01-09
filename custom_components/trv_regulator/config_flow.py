@@ -8,6 +8,13 @@ from .const import (
     DEFAULT_HYSTERESIS,
     DEFAULT_VENT_DELAY,
     DEFAULT_POST_VENT_DURATION,
+    DEFAULT_GAIN,
+    DEFAULT_OFFSET,
+    MIN_GAIN,
+    MAX_GAIN,
+    MIN_OFFSET,
+    MAX_OFFSET,
+    DEFAULT_ADAPTIVE_LEARNING,
 )
 
 
@@ -95,6 +102,15 @@ class TrvRegulatorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Optional(
                         "post_vent_duration", default=DEFAULT_POST_VENT_DURATION
                     ): vol.Coerce(int),
+                    vol.Optional(
+                        "gain", default=DEFAULT_GAIN
+                    ): vol.All(vol.Coerce(float), vol.Range(min=MIN_GAIN, max=MAX_GAIN)),
+                    vol.Optional(
+                        "offset", default=DEFAULT_OFFSET
+                    ): vol.All(vol.Coerce(float), vol.Range(min=MIN_OFFSET, max=MAX_OFFSET)),
+                    vol.Optional(
+                        "adaptive_learning", default=DEFAULT_ADAPTIVE_LEARNING
+                    ): bool,
                 }
             ),
         )

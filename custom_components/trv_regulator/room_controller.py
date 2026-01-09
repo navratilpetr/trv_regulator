@@ -2,6 +2,7 @@
 import logging
 import time
 from typing import Any
+from collections import deque
 
 from .const import (
     STATE_IDLE,
@@ -10,6 +11,12 @@ from .const import (
     STATE_POST_VENT,
     TRV_ON,
     TRV_OFF,
+    DEFAULT_GAIN,
+    DEFAULT_OFFSET,
+    TRV_MIN_TEMP,
+    TRV_MAX_TEMP,
+    DEFAULT_ADAPTIVE_LEARNING,
+    DEFAULT_UPDATE_INTERVAL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -31,6 +38,9 @@ class RoomController:
         hysteresis: float,
         vent_delay: int,
         post_vent_duration: int,
+        gain: float = DEFAULT_GAIN,
+        offset: float = DEFAULT_OFFSET,
+        adaptive_learning: bool = DEFAULT_ADAPTIVE_LEARNING,
     ):
         """Inicializace controlleru."""
         self._hass = hass
@@ -44,16 +54,28 @@ class RoomController:
         self._hysteresis = hysteresis
         self._vent_delay = vent_delay
         self._post_vent_duration = post_vent_duration
+        self._gain = gain
+        self._offset = offset
+        self._adaptive_learning = adaptive_learning
 
         self._state = STATE_IDLE
         self._window_opened_at = None
         self._post_vent_timer = None
+        
+        # Adaptivní učení - historie teplot
+        # 1 hodina při DEFAULT_UPDATE_INTERVAL (10s) = 360 vzorků
+        history_size = 60 * 60 // DEFAULT_UPDATE_INTERVAL
+        self._temp_history = deque(maxlen=history_size)
+        self._last_trv_target = None
+        self._commands_total = 0
 
         _LOGGER.info(
             f"TRV [{self._room_name}] initialized: "
             f"hysteresis={self._hysteresis}°C, "
+            f"gain={self._gain}, offset={self._offset}, "
             f"vent_delay={self._vent_delay}s, "
-            f"post_vent_duration={self._post_vent_duration}s"
+            f"post_vent_duration={self._post_vent_duration}s, "
+            f"adaptive_learning={self._adaptive_learning}"
         )
 
     async def async_update(self):
@@ -62,6 +84,9 @@ class RoomController:
         temp = self._get_temperature()
         target = self._get_target()
         window_open = self._any_window_open()
+        
+        # Uložit do historie pro adaptivní učení
+        self._temp_history.append(temp)
 
         # 2. Vyhodnoť stavový automat
         new_state = self._evaluate_state(temp, target, window_open)
@@ -118,7 +143,7 @@ class RoomController:
         return self._evaluate_heating(temp, target)
 
     def _evaluate_heating(self, temp: float, target: float) -> str:
-        """Vyhodnotí, zda má být zapnuto topení."""
+        """Vyhodnotí, zda má být zapnuto topení (s hysterezí pro změnu stavu)."""
         lower_threshold = target - self._hysteresis
         upper_threshold = target + self._hysteresis
 
@@ -141,6 +166,46 @@ class RoomController:
             f"→ staying in {self._state.upper()}"
         )
         return self._state  # Zůstat v aktuálním stavu
+    
+    def _calculate_proportional_target(
+        self, room_temp: float, desired_temp: float, trv_local_temp: float
+    ) -> float:
+        """
+        Vypočítá cílovou teplotu pro TRV pomocí proporcionální regulace.
+        
+        Args:
+            room_temp: Teplota v místnosti (externím senzorem)
+            desired_temp: Požadovaná teplota
+            trv_local_temp: Lokální teplota z TRV hlavice
+        
+        Returns:
+            Cílová teplota pro nastavení TRV (5-35°C)
+        """
+        # Sanity check vstupních hodnot
+        if not (-10 <= room_temp <= 50) or not (-10 <= desired_temp <= 50):
+            _LOGGER.warning(
+                f"TRV [{self._room_name}]: Invalid temperature values "
+                f"(room={room_temp}°C, desired={desired_temp}°C), "
+                f"using safe default"
+            )
+            return TRV_MIN_TEMP
+        
+        diff = desired_temp - room_temp
+        
+        # Proporcionální zesílení
+        target = diff * self._gain + self._offset + trv_local_temp
+        
+        # Clamp 5-35°C
+        clamped = max(TRV_MIN_TEMP, min(TRV_MAX_TEMP, target))
+        
+        _LOGGER.debug(
+            f"TRV [{self._room_name}]: Proportional calculation: "
+            f"diff={diff:.2f}°C, gain={self._gain}, offset={self._offset}, "
+            f"trv_local={trv_local_temp:.1f}°C → "
+            f"target={target:.1f}°C (clamped to {clamped:.1f}°C)"
+        )
+        
+        return clamped
 
     async def _transition_to(self, new_state: str, temp: float, target: float):
         """Provede přechod do nového stavu."""
@@ -156,7 +221,7 @@ class RoomController:
 
         # Akce podle nového stavu
         if new_state == STATE_HEATING:
-            await self._set_all_trv(TRV_ON)
+            await self._set_all_trv_proportional(temp, target)
 
         elif new_state == STATE_IDLE:
             await self._set_all_trv(TRV_OFF)
@@ -206,6 +271,61 @@ class RoomController:
                 {"entity_id": entity_id, "temperature": temp},
                 blocking=True,
             )
+        
+        self._commands_total += active_count
+        
+    async def _set_all_trv_proportional(self, room_temp: float, desired_temp: float):
+        """Nastaví všechny TRV pomocí proporcionální regulace."""
+        active_trvs = [trv for trv in self._trv_entities if trv.get("enabled", True)]
+        active_count = len(active_trvs)
+        
+        if active_count == 0:
+            _LOGGER.warning(f"TRV [{self._room_name}]: No active TRVs to control")
+            return
+        
+        # Použít první TRV pro získání lokální teploty (všechny by měly být podobné)
+        first_trv = active_trvs[0]["entity"]
+        trv_local_temp = self._get_trv_local_temperature(first_trv)
+        
+        # Vypočítat cílovou teplotu
+        target_temp = self._calculate_proportional_target(
+            room_temp, desired_temp, trv_local_temp
+        )
+        
+        self._last_trv_target = target_temp
+        
+        _LOGGER.info(
+            f"TRV [{self._room_name}]: Setting {active_count} TRV(s) to "
+            f"HEAT mode with proportional target={target_temp:.1f}°C "
+            f"(room={room_temp:.1f}°C, desired={desired_temp:.1f}°C, "
+            f"trv_local={trv_local_temp:.1f}°C)"
+        )
+        
+        for trv_config in active_trvs:
+            entity_id = trv_config["entity"]
+            
+            _LOGGER.debug(
+                f"TRV [{self._room_name}]: Sending to {entity_id}: "
+                f"hvac_mode=heat, temperature={target_temp:.1f}°C"
+            )
+            
+            # Nastavit hvac_mode na heat
+            await self._hass.services.async_call(
+                "climate",
+                "set_hvac_mode",
+                {"entity_id": entity_id, "hvac_mode": "heat"},
+                blocking=True,
+            )
+            
+            # Nastavit proporcionální teplotu
+            await self._hass.services.async_call(
+                "climate",
+                "set_temperature",
+                {"entity_id": entity_id, "temperature": target_temp},
+                blocking=True,
+            )
+        
+        self._commands_total += active_count
 
     def _get_temperature(self) -> float:
         """Načte aktuální teplotu."""
@@ -223,6 +343,46 @@ class RoomController:
                 f"TRV [{self._room_name}]: Cannot parse temperature: {state.state}"
             )
             return 0.0
+    
+    def _get_trv_local_temperature(self, entity_id: str) -> float:
+        """
+        Načte lokální teplotu z TRV hlavice.
+        
+        Args:
+            entity_id: ID entity TRV hlavice
+        
+        Returns:
+            Lokální teplota měřená TRV hlavicí
+        """
+        state = self._hass.states.get(entity_id)
+        if state is None:
+            _LOGGER.warning(
+                f"TRV [{self._room_name}]: TRV entity {entity_id} not found"
+            )
+            # Fallback na pokojovou teplotu
+            return self._get_temperature()
+        
+        # Zkusit získat current_temperature z atributů
+        trv_temp = state.attributes.get("current_temperature")
+        
+        if trv_temp is None:
+            _LOGGER.debug(
+                f"TRV [{self._room_name}]: TRV {entity_id} has no current_temperature, "
+                f"using room temperature as fallback"
+            )
+            return self._get_temperature()
+        
+        try:
+            temp = float(trv_temp)
+            _LOGGER.debug(
+                f"TRV [{self._room_name}]: TRV local temperature from {entity_id}: {temp:.1f}°C"
+            )
+            return temp
+        except (ValueError, TypeError):
+            _LOGGER.error(
+                f"TRV [{self._room_name}]: Cannot parse TRV temperature: {trv_temp}"
+            )
+            return self._get_temperature()
 
     def _get_target(self) -> float:
         """Načte cílovou teplotu."""
@@ -258,8 +418,94 @@ class RoomController:
         if not self._post_vent_timer:
             return True
         return time.time() - self._post_vent_timer >= self._post_vent_duration
+    
+    def calculate_oscillation(self) -> float:
+        """
+        Vypočítá oscilaci teploty za poslední hodinu.
+        
+        Returns:
+            Poloviční rozpětí teplot (amplituda oscilace) v °C
+        """
+        # Minimálně 1 minuta dat při DEFAULT_UPDATE_INTERVAL (10s) = 6 vzorků
+        min_samples = 60 // DEFAULT_UPDATE_INTERVAL
+        if len(self._temp_history) < min_samples:
+            return 0.0
+        
+        recent_temps = list(self._temp_history)
+        oscillation = (max(recent_temps) - min(recent_temps)) / 2
+        
+        _LOGGER.debug(
+            f"TRV [{self._room_name}]: Oscillation over {len(recent_temps)} samples: "
+            f"{oscillation:.2f}°C"
+        )
+        
+        return oscillation
+    
+    def get_learned_gain(self) -> float | None:
+        """
+        Vrací naučený gain (placeholder pro budoucí ML).
+        
+        Returns:
+            Optimální gain nebo None pokud ještě není naučen
+        """
+        # TODO: Implementovat ML algoritmus
+        # Pro teď vracíme None - použije se aktuální gain
+        return None
+    
+    def recommend_gain_adjustment(self) -> float | None:
+        """
+        Doporučí úpravu gain na základě oscilací (placeholder pro budoucí ML).
+        
+        Returns:
+            Doporučený nový gain nebo None pokud není doporučení
+        """
+        if not self._adaptive_learning:
+            return None
+        
+        osc = self.calculate_oscillation()
+        
+        # Minimálně 30 minut dat pro doporučení (při DEFAULT_UPDATE_INTERVAL)
+        min_samples_for_recommendation = 30 * 60 // DEFAULT_UPDATE_INTERVAL
+        
+        # Velmi jednoduchá heuristika - bude nahrazena ML
+        if osc > 0.4:  # Příliš velké oscilace
+            new_gain = self._gain * 0.9
+            _LOGGER.info(
+                f"TRV [{self._room_name}]: High oscillation ({osc:.2f}°C), "
+                f"recommending gain reduction: {self._gain:.1f} → {new_gain:.1f}"
+            )
+            return new_gain
+        elif osc < 0.2 and len(self._temp_history) >= min_samples_for_recommendation:
+            new_gain = self._gain * 1.05
+            _LOGGER.info(
+                f"TRV [{self._room_name}]: Low oscillation ({osc:.2f}°C), "
+                f"recommending gain increase: {self._gain:.1f} → {new_gain:.1f}"
+            )
+            return new_gain
+        
+        return None
 
     @property
     def state(self) -> str:
         """Vrací aktuální stav."""
         return self._state
+    
+    @property
+    def gain(self) -> float:
+        """Vrací aktuální gain."""
+        return self._gain
+    
+    @property
+    def offset(self) -> float:
+        """Vrací aktuální offset."""
+        return self._offset
+    
+    @property
+    def last_trv_target(self) -> float | None:
+        """Vrací poslední vypočítanou cílovou teplotu pro TRV."""
+        return self._last_trv_target
+    
+    @property
+    def commands_total(self) -> int:
+        """Vrací celkový počet odeslaných příkazů."""
+        return self._commands_total
