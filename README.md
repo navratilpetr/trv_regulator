@@ -12,21 +12,28 @@ Custom integrace pro Home Assistant - řízení vytápění po místnostech pomo
 
 ## 📦 Instalace
 
-### HACS (doporučeno)
-1. Otevři HACS v Home Assistantu
-2. Přejdi na "Integrace"
-3. Klikni na tři tečky vpravo nahoře → "Vlastní repozitáře"
-4. Přidej URL: `https://github.com/navratilpetr/trv_regulator`
-5. Kategorie: Integration
-6. Klikni "Přidat"
-7. Najdi "TRV Regulator" a nainstaluj
-8. Restartuj Home Assistant
+### Pomocí HACS (doporučeno)
 
-### Manuální instalace
-1. Stáhni nejnovější release
-2. Zkopíruj složku `custom_components/trv_regulator` do tvé Home Assistant konfigurace
-3. Restartuj Home Assistant
-4. Přidej integraci přes UI: Nastavení → Zařízení a služby → Přidat integraci → "TRV Regulator"
+1. Otevři HACS v Home Assistant
+2. Klikni na "Integrace"
+3. Klikni na tři tečky vpravo nahoře a vyber "Vlastní repozitáře"
+4. Přidej URL: `https://github.com/navratilpetr/trv_regulator`
+5. Kategorie: `Integration`
+6. Klikni "Přidat"
+7. Najdi "TRV Regulator" v HACS a klikni "Stáhnout"
+8. Restartuj Home Assistant
+9. Přidej integraci: Nastavení → Zařízení a služby → Přidat integraci → "TRV Regulator"
+
+### Ruční instalace
+
+1. Zkopíruj složku `custom_components/trv_regulator` do tvé Home Assistant konfigurace:
+   ```bash
+   cd /config/custom_components
+   git clone https://github.com/navratilpetr/trv_regulator.git
+   cp -r trv_regulator/custom_components/trv_regulator ./
+   ```
+2. Restartuj Home Assistant
+3. Přidej integraci přes UI: Nastavení → Zařízení a služby → Přidat integraci → "TRV Regulator"
 
 ## 🔧 Konfigurace
 
