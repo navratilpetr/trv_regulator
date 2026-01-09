@@ -17,7 +17,7 @@ a projekt dodržuje [sémantické verzování](https://semver.org/lang/cs/).
   - `sensor.trv_{room}_offset` - aktuální offset hodnota
   - `sensor.trv_{room}_oscillation` - oscilace teploty
   - `sensor.trv_{room}_trv_target` - cílová teplota poslaná na TRV
-  - `sensor.trv_{room}_commands_today` - počet příkazů
+  - `sensor.trv_{room}_commands_total` - celkový počet příkazů
   - `sensor.trv_{room}_learned_gain` - naučený gain (placeholder pro ML)
 - **Adaptivní učení** - základ pro budoucí ML optimalizaci
   - Historie teplot (1 hodina)

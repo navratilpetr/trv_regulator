@@ -16,6 +16,7 @@ from .const import (
     TRV_MIN_TEMP,
     TRV_MAX_TEMP,
     DEFAULT_ADAPTIVE_LEARNING,
+    DEFAULT_UPDATE_INTERVAL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -62,9 +63,11 @@ class RoomController:
         self._post_vent_timer = None
         
         # Adaptivní učení - historie teplot
-        self._temp_history = deque(maxlen=360)  # 1 hodina při 10s intervalu
+        # 1 hodina při DEFAULT_UPDATE_INTERVAL (10s) = 360 vzorků
+        history_size = 60 * 60 // DEFAULT_UPDATE_INTERVAL
+        self._temp_history = deque(maxlen=history_size)
         self._last_trv_target = None
-        self._commands_today = 0
+        self._commands_total = 0
 
         _LOGGER.info(
             f"TRV [{self._room_name}] initialized: "
@@ -178,6 +181,15 @@ class RoomController:
         Returns:
             Cílová teplota pro nastavení TRV (5-35°C)
         """
+        # Sanity check vstupních hodnot
+        if not (-10 <= room_temp <= 50) or not (-10 <= desired_temp <= 50):
+            _LOGGER.warning(
+                f"TRV [{self._room_name}]: Invalid temperature values "
+                f"(room={room_temp}°C, desired={desired_temp}°C), "
+                f"using safe default"
+            )
+            return TRV_MIN_TEMP
+        
         diff = desired_temp - room_temp
         
         # Proporcionální zesílení
@@ -260,7 +272,7 @@ class RoomController:
                 blocking=True,
             )
         
-        self._commands_today += active_count
+        self._commands_total += active_count
         
     async def _set_all_trv_proportional(self, room_temp: float, desired_temp: float):
         """Nastaví všechny TRV pomocí proporcionální regulace."""
@@ -313,7 +325,7 @@ class RoomController:
                 blocking=True,
             )
         
-        self._commands_today += active_count
+        self._commands_total += active_count
 
     def _get_temperature(self) -> float:
         """Načte aktuální teplotu."""
@@ -414,7 +426,9 @@ class RoomController:
         Returns:
             Poloviční rozpětí teplot (amplituda oscilace) v °C
         """
-        if len(self._temp_history) < 6:  # Minimálně 1 minuta dat
+        # Minimálně 1 minuta dat při DEFAULT_UPDATE_INTERVAL (10s) = 6 vzorků
+        min_samples = 60 // DEFAULT_UPDATE_INTERVAL
+        if len(self._temp_history) < min_samples:
             return 0.0
         
         recent_temps = list(self._temp_history)
@@ -450,6 +464,9 @@ class RoomController:
         
         osc = self.calculate_oscillation()
         
+        # Minimálně 30 minut dat pro doporučení (při DEFAULT_UPDATE_INTERVAL)
+        min_samples_for_recommendation = 30 * 60 // DEFAULT_UPDATE_INTERVAL
+        
         # Velmi jednoduchá heuristika - bude nahrazena ML
         if osc > 0.4:  # Příliš velké oscilace
             new_gain = self._gain * 0.9
@@ -458,7 +475,7 @@ class RoomController:
                 f"recommending gain reduction: {self._gain:.1f} → {new_gain:.1f}"
             )
             return new_gain
-        elif osc < 0.2 and len(self._temp_history) >= 180:  # Příliš malé oscilace
+        elif osc < 0.2 and len(self._temp_history) >= min_samples_for_recommendation:
             new_gain = self._gain * 1.05
             _LOGGER.info(
                 f"TRV [{self._room_name}]: Low oscillation ({osc:.2f}°C), "
@@ -489,6 +506,6 @@ class RoomController:
         return self._last_trv_target
     
     @property
-    def commands_today(self) -> int:
-        """Vrací počet příkazů odeslaných dnes."""
-        return self._commands_today
+    def commands_total(self) -> int:
+        """Vrací celkový počet odeslaných příkazů."""
+        return self._commands_total

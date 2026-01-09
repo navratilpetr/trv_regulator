@@ -41,7 +41,8 @@ class TrvBaseSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._room_name = room_name
         self._sensor_type = sensor_type
-        self._attr_unique_id = f"{entry_id}_{sensor_type}"
+        # Použít DOMAIN v unique_id pro prevenci konfliktů
+        self._attr_unique_id = f"{DOMAIN}_{entry_id}_{sensor_type}"
         self._attr_has_entity_name = True
 
 
@@ -114,18 +115,18 @@ class TrvTargetSensor(TrvBaseSensor):
 
 
 class TrvCommandsSensor(TrvBaseSensor):
-    """Senzor pro počet příkazů odeslaných dnes."""
+    """Senzor pro celkový počet odeslaných příkazů."""
 
     def __init__(self, coordinator, room_name: str, entry_id: str):
         """Inicializace commands senzoru."""
-        super().__init__(coordinator, room_name, entry_id, "commands_today")
-        self._attr_name = f"TRV {room_name} Commands Today"
+        super().__init__(coordinator, room_name, entry_id, "commands_total")
+        self._attr_name = f"TRV {room_name} Commands Total"
         self._attr_icon = "mdi:counter"
 
     @property
     def native_value(self):
-        """Vrací počet příkazů."""
-        return self.coordinator.room.commands_today
+        """Vrací celkový počet příkazů."""
+        return self.coordinator.room.commands_total
 
 
 class TrvLearnedGainSensor(TrvBaseSensor):

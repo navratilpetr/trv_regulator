@@ -102,7 +102,7 @@ Pro každou místnost se automaticky vytvoří tyto senzory:
 - `sensor.trv_{room}_offset` - aktuální offset hodnota  
 - `sensor.trv_{room}_oscillation` - oscilace teploty v °C
 - `sensor.trv_{room}_trv_target` - cílová teplota poslaná na TRV
-- `sensor.trv_{room}_commands_today` - počet příkazů odeslaných TRV
+- `sensor.trv_{room}_commands_total` - celkový počet odeslaných příkazů
 - `sensor.trv_{room}_learned_gain` - naučený gain (budoucí ML)
 
 ## 📊 Stavový automat
@@ -224,7 +224,7 @@ Po upgradu se automaticky vytvoří 6 nových senzorů pro každou místnost (vi
 ### Test 6: Diagnostické senzory
 1. Zkontroluj, že se vytvořily všechny senzory pro místnost
 2. `sensor.trv_{room}_oscillation` by měla být po pár hodinách <0.4°C
-3. `sensor.trv_{room}_commands_today` by měl počítat příkazy
+3. `sensor.trv_{room}_commands_total` by měl počítat všechny příkazy
 4. Sleduj `sensor.trv_{room}_trv_target` při změnách teploty
 
 ## 🐛 Řešení problémů
