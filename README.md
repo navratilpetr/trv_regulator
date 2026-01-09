@@ -130,6 +130,31 @@ Nastavení → Systém → Protokoly → Hledat "TRV"
 - Zkontroluj jednotky (°C)
 - Sleduj logy pro varování o nedostupných entitách
 
+## 🔄 Verzování
+
+Integrace používá [sémantické verzování](https://semver.org/lang/cs/) (SemVer):
+
+- **0.0.x** - Vývoj a testování (nestabilní)
+- **0.x.0** - Alpha/Beta verze (funkční, ale s možnými změnami)
+- **1.0.0+** - Stabilní produkční verze
+
+### Automatické verzování
+
+Při merge pull requestu se verze automaticky zvýší podle labelu:
+
+- `breaking` - zvýší MAJOR verzi (např. 0.1.0 → 1.0.0)
+- `feature` - zvýší MINOR verzi (např. 0.1.2 → 0.2.0)
+- Bez labelu - zvýší PATCH verzi (např. 0.1.2 → 0.1.3)
+
+### Aktuální verze
+
+Aktuální verzi najdeš v souboru `custom_components/trv_regulator/manifest.json`.
+
+Pro update v Home Assistant:
+1. Stáhni nejnovější verzi z GitHubu
+2. Restartuj Home Assistant
+3. Zkontroluj Nastavení → Zařízení a služby → TRV Regulator
+
 ## 📄 Licence
 
 MIT
