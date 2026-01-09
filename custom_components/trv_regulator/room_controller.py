@@ -49,6 +49,13 @@ class RoomController:
         self._window_opened_at = None
         self._post_vent_timer = None
 
+        _LOGGER.info(
+            f"TRV [{self._room_name}] initialized: "
+            f"hysteresis={self._hysteresis}°C, "
+            f"vent_delay={self._vent_delay}s, "
+            f"post_vent_duration={self._post_vent_duration}s"
+        )
+
     async def async_update(self):
         """Hlavní update loop – volá se při změně libovolné entity."""
         # 1. Načti aktuální hodnoty
@@ -69,17 +76,35 @@ class RoomController:
         if window_open:
             if self._window_opened_at is None:
                 self._window_opened_at = time.time()
+                _LOGGER.info(f"TRV [{self._room_name}]: Window opened")
 
-            if time.time() - self._window_opened_at >= self._vent_delay:
+            elapsed = time.time() - self._window_opened_at
+            if elapsed >= self._vent_delay:
+                _LOGGER.debug(
+                    f"TRV [{self._room_name}]: Window open for {elapsed:.0f}s "
+                    f"(>= {self._vent_delay}s) → triggering VENT"
+                )
                 return STATE_VENT
         else:
+            if self._window_opened_at is not None:
+                _LOGGER.info(f"TRV [{self._room_name}]: Window closed")
             self._window_opened_at = None
 
         # POST_VENT nesmí skončit dřív než timer
         if self._state == STATE_POST_VENT:
             if self._post_vent_timer and not self._post_vent_timer_expired():
+                elapsed = time.time() - self._post_vent_timer
+                remaining = self._post_vent_duration - elapsed
+                _LOGGER.debug(
+                    f"TRV [{self._room_name}]: POST_VENT timer: "
+                    f"{elapsed:.0f}s elapsed, {remaining:.0f}s remaining"
+                )
                 return STATE_POST_VENT
             else:
+                _LOGGER.info(
+                    f"TRV [{self._room_name}]: POST_VENT timer expired "
+                    f"({self._post_vent_duration}s) → evaluating heating"
+                )
                 # Timer vypršel → okamžitě vyhodnotit regulaci
                 return self._evaluate_heating(temp, target)
 
@@ -94,10 +119,27 @@ class RoomController:
 
     def _evaluate_heating(self, temp: float, target: float) -> str:
         """Vyhodnotí, zda má být zapnuto topení."""
-        if temp <= target - self._hysteresis:
+        lower_threshold = target - self._hysteresis
+        upper_threshold = target + self._hysteresis
+
+        if temp <= lower_threshold:
+            _LOGGER.debug(
+                f"TRV [{self._room_name}]: Temperature {temp:.1f}°C "
+                f"<= {lower_threshold:.1f}°C (target-hysteresis) → HEATING"
+            )
             return STATE_HEATING
-        elif temp >= target + self._hysteresis:
+        elif temp >= upper_threshold:
+            _LOGGER.debug(
+                f"TRV [{self._room_name}]: Temperature {temp:.1f}°C "
+                f">= {upper_threshold:.1f}°C (target+hysteresis) → IDLE"
+            )
             return STATE_IDLE
+
+        _LOGGER.debug(
+            f"TRV [{self._room_name}]: Temperature {temp:.1f}°C "
+            f"within hysteresis ({lower_threshold:.1f}-{upper_threshold:.1f}°C) "
+            f"→ staying in {self._state}"
+        )
         return self._state  # Zůstat v aktuálním stavu
 
     async def _transition_to(self, new_state: str, temp: float, target: float):
@@ -107,8 +149,9 @@ class RoomController:
 
         # Log
         _LOGGER.info(
-            f"TRV [{self._room_name}]: {old_state} -> {new_state} "
-            f"(temp {temp:.1f}, target {target:.1f})"
+            f"TRV [{self._room_name}]: {old_state.upper()} → {new_state.upper()} "
+            f"(temp={temp:.1f}°C, target={target:.1f}°C, "
+            f"hysteresis=±{self._hysteresis}°C)"
         )
 
         # Akce podle nového stavu
@@ -127,17 +170,32 @@ class RoomController:
 
     async def _set_all_trv(self, command: dict[str, Any]):
         """Nastaví všechny aktivní TRV (respektuje enable/disable)."""
+        mode = command["hvac_mode"]
+        temp = command["temperature"]
+
+        active_count = sum(1 for trv in self._trv_entities if trv.get("enabled", True))
+
+        _LOGGER.info(
+            f"TRV [{self._room_name}]: Setting {active_count} TRV(s) to "
+            f"{mode.upper()} ({temp}°C)"
+        )
+
         for trv_config in self._trv_entities:
             if not trv_config.get("enabled", True):
                 continue
 
             entity_id = trv_config["entity"]
 
+            _LOGGER.debug(
+                f"TRV [{self._room_name}]: Sending to {entity_id}: "
+                f"hvac_mode={mode}, temperature={temp}"
+            )
+
             # Nastavit hvac_mode
             await self._hass.services.async_call(
                 "climate",
                 "set_hvac_mode",
-                {"entity_id": entity_id, "hvac_mode": command["hvac_mode"]},
+                {"entity_id": entity_id, "hvac_mode": mode},
                 blocking=True,
             )
 
@@ -145,7 +203,7 @@ class RoomController:
             await self._hass.services.async_call(
                 "climate",
                 "set_temperature",
-                {"entity_id": entity_id, "temperature": command["temperature"]},
+                {"entity_id": entity_id, "temperature": temp},
                 blocking=True,
             )
 
