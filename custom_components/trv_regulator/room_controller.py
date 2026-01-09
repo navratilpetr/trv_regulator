@@ -256,19 +256,15 @@ class RoomController:
                 f"hvac_mode={mode}, temperature={temp}"
             )
 
-            # Nastavit hvac_mode
-            await self._hass.services.async_call(
-                "climate",
-                "set_hvac_mode",
-                {"entity_id": entity_id, "hvac_mode": mode},
-                blocking=True,
-            )
-
-            # Nastavit temperature
+            # Nastavit hvac_mode a temperature v jednom volání
             await self._hass.services.async_call(
                 "climate",
                 "set_temperature",
-                {"entity_id": entity_id, "temperature": temp},
+                {
+                    "entity_id": entity_id,
+                    "hvac_mode": mode,
+                    "temperature": temp
+                },
                 blocking=True,
             )
         
@@ -309,19 +305,15 @@ class RoomController:
                 f"hvac_mode=heat, temperature={target_temp:.1f}°C"
             )
             
-            # Nastavit hvac_mode na heat
-            await self._hass.services.async_call(
-                "climate",
-                "set_hvac_mode",
-                {"entity_id": entity_id, "hvac_mode": "heat"},
-                blocking=True,
-            )
-            
-            # Nastavit proporcionální teplotu
+            # Nastavit hvac_mode a proporcionální teplotu v jednom volání
             await self._hass.services.async_call(
                 "climate",
                 "set_temperature",
-                {"entity_id": entity_id, "temperature": target_temp},
+                {
+                    "entity_id": entity_id,
+                    "hvac_mode": "heat",
+                    "temperature": target_temp
+                },
                 blocking=True,
             )
         
