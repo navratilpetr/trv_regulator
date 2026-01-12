@@ -13,7 +13,7 @@ TRV_OFF = {"hvac_mode": "off", "temperature": 5}
 
 # Výchozí hodnoty
 DEFAULT_HYSTERESIS = 0.3
-DEFAULT_VENT_DELAY = 120  # sekundy
+DEFAULT_WINDOW_OPEN_DELAY = 120  # sekundy
 DEFAULT_UPDATE_INTERVAL = 30  # sekundy
 
 # Učící algoritmus

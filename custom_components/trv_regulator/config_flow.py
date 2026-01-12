@@ -6,7 +6,7 @@ from homeassistant.helpers import selector
 from .const import (
     DOMAIN,
     DEFAULT_HYSTERESIS,
-    DEFAULT_VENT_DELAY,
+    DEFAULT_WINDOW_OPEN_DELAY,
     DEFAULT_LEARNING_SPEED,
     DEFAULT_LEARNING_CYCLES,
     DEFAULT_DESIRED_OVERSHOOT,
@@ -87,7 +87,7 @@ class TrvRegulatorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Optional(
                         "hysteresis", default=DEFAULT_HYSTERESIS
                     ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=2.0)),
-                    vol.Optional("vent_delay", default=DEFAULT_VENT_DELAY): vol.All(
+                    vol.Optional("window_open_delay", default=DEFAULT_WINDOW_OPEN_DELAY): vol.All(
                         vol.Coerce(int), vol.Range(min=30, max=600)
                     ),
                     vol.Optional(
@@ -160,8 +160,8 @@ class TrvRegulatorOptionsFlow(config_entries.OptionsFlow):
                         default=current_options.get("hysteresis", current_data.get("hysteresis", DEFAULT_HYSTERESIS))
                     ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=2.0)),
                     vol.Optional(
-                        "vent_delay",
-                        default=current_options.get("vent_delay", current_data.get("vent_delay", DEFAULT_VENT_DELAY))
+                        "window_open_delay",
+                        default=current_options.get("window_open_delay", current_data.get("window_open_delay", DEFAULT_WINDOW_OPEN_DELAY))
                     ): vol.All(vol.Coerce(int), vol.Range(min=30, max=600)),
                     vol.Optional(
                         "learning_speed",

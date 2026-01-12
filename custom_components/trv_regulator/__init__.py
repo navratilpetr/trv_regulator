@@ -67,15 +67,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         for entity_id in entry.data["trv_entities"]
     ]
 
-    # Merge window_entities a door_entities (pro zpětnou kompatibilitu)
-    # Preferovat options pokud existují, jinak použít data
+    # Merge window_entities and door_entities (for backward compatibility)
+    # Prefer options if exists, otherwise use data
     window_entities = entry.options.get("window_entities", entry.data.get("window_entities", []))
     door_entities = entry.data.get("door_entities", [])
     all_window_entities = list(window_entities) + list(door_entities)
 
-    # Helper funkce pro čtení z options nebo data
+    # Helper function to read from options or data (with backward compatibility for vent_delay)
     def get_config_value(key, default):
-        return entry.options.get(key, entry.data.get(key, default))
+        value = entry.options.get(key, entry.data.get(key))
+        # Backward compatibility: if window_open_delay not found, try vent_delay
+        if value is None and key == "window_open_delay":
+            value = entry.options.get("vent_delay", entry.data.get("vent_delay"))
+        return value if value is not None else default
 
     room = RoomController(
         hass,
@@ -85,7 +89,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         trv_entities=trv_entities,
         window_entities=all_window_entities,
         hysteresis=get_config_value("hysteresis", 0.3),
-        vent_delay=get_config_value("vent_delay", 120),
+        window_open_delay=get_config_value("window_open_delay", 120),
         learning_speed=get_config_value("learning_speed", DEFAULT_LEARNING_SPEED),
         learning_cycles_required=get_config_value("learning_cycles_required", DEFAULT_LEARNING_CYCLES),
         desired_overshoot=get_config_value("desired_overshoot", DEFAULT_DESIRED_OVERSHOOT),
