@@ -6,7 +6,17 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_track_state_change_event
 
-from .const import DOMAIN, DEFAULT_GAIN, DEFAULT_OFFSET, DEFAULT_ADAPTIVE_LEARNING
+from .const import (
+    DOMAIN,
+    DEFAULT_LEARNING_SPEED,
+    DEFAULT_LEARNING_CYCLES,
+    DEFAULT_DESIRED_OVERSHOOT,
+    DEFAULT_MIN_HEATING_DURATION,
+    DEFAULT_MAX_HEATING_DURATION,
+    DEFAULT_MAX_VALID_OVERSHOOT,
+    DEFAULT_COOLDOWN_DURATION,
+    TARGET_DEBOUNCE_DELAY,
+)
 from .coordinator import TrvRegulatorCoordinator
 from .room_controller import RoomController
 
@@ -57,37 +67,52 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         for entity_id in entry.data["trv_entities"]
     ]
 
+    # Merge window_entities a door_entities (pro zpětnou kompatibilitu)
+    # Preferovat options pokud existují, jinak použít data
+    window_entities = entry.options.get("window_entities", entry.data.get("window_entities", []))
+    door_entities = entry.data.get("door_entities", [])
+    all_window_entities = list(window_entities) + list(door_entities)
+
+    # Helper funkce pro čtení z options nebo data
+    def get_config_value(key, default):
+        return entry.options.get(key, entry.data.get(key, default))
+
     room = RoomController(
         hass,
         room_name=entry.data["room_name"],
         temperature_entity=entry.data["temperature_entity"],
         target_entity=entry.data["target_entity"],
         trv_entities=trv_entities,
-        window_entities=entry.data.get("window_entities", []),
-        door_entities=entry.data.get("door_entities", []),
-        heating_water_temp_entity=entry.data["heating_water_temp_entity"],
-        hysteresis=entry.data.get("hysteresis", 0.3),
-        vent_delay=entry.data.get("vent_delay", 120),
-        post_vent_duration=entry.data.get("post_vent_duration", 300),
-        gain=entry.data.get("gain", DEFAULT_GAIN),
-        offset=entry.data.get("offset", DEFAULT_OFFSET),
-        adaptive_learning=entry.data.get("adaptive_learning", DEFAULT_ADAPTIVE_LEARNING),
+        window_entities=all_window_entities,
+        hysteresis=get_config_value("hysteresis", 0.3),
+        vent_delay=get_config_value("vent_delay", 120),
+        learning_speed=get_config_value("learning_speed", DEFAULT_LEARNING_SPEED),
+        learning_cycles_required=get_config_value("learning_cycles_required", DEFAULT_LEARNING_CYCLES),
+        desired_overshoot=get_config_value("desired_overshoot", DEFAULT_DESIRED_OVERSHOOT),
+        min_heating_duration=get_config_value("min_heating_duration", DEFAULT_MIN_HEATING_DURATION),
+        max_heating_duration=get_config_value("max_heating_duration", DEFAULT_MAX_HEATING_DURATION),
+        max_valid_overshoot=get_config_value("max_valid_overshoot", DEFAULT_MAX_VALID_OVERSHOOT),
+        cooldown_duration=get_config_value("cooldown_duration", DEFAULT_COOLDOWN_DURATION),
     )
 
     # Vytvoř coordinator
     coordinator = TrvRegulatorCoordinator(hass, room)
 
-    # Track změny všech relevantních entit
+    # Set refresh callback to avoid circular import
+    room.set_refresh_callback(coordinator.async_request_refresh)
+
+    # Track změny relevantních entit
+    # Target entity má debounce přímo v room_controller
     tracked_entities = [
         entry.data["temperature_entity"],
         entry.data["target_entity"],
         *entry.data["trv_entities"],
-        *entry.data.get("window_entities", []),
-        entry.data["heating_water_temp_entity"],
+        *all_window_entities,
     ]
 
     async def _entity_listener(event):
         """Listener pro změny entit."""
+        # Pro target_entity nechat room_controller zpracovat debounce
         await coordinator.async_request_refresh()
 
     async_track_state_change_event(hass, tracked_entities, _entity_listener)

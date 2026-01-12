@@ -4,6 +4,8 @@ import logging
 
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
+from .const import DEFAULT_UPDATE_INTERVAL
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -16,7 +18,7 @@ class TrvRegulatorCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name="TRV Regulator",
-            update_interval=timedelta(seconds=30),  # fallback
+            update_interval=timedelta(seconds=DEFAULT_UPDATE_INTERVAL),
         )
         self.room = room_controller
 

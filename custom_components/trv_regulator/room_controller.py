@@ -1,39 +1,47 @@
-"""Stavový automat pro řízení TRV v místnosti."""
+"""Stavový automat pro řízení TRV v místnosti - ON/OFF režim s adaptivním učením."""
+import asyncio
 import logging
 import time
 import json
 import os
-from typing import Any
-from collections import deque
+from typing import Any, Optional
+from datetime import datetime
 
 from .const import (
     STATE_IDLE,
     STATE_HEATING,
+    STATE_COOLDOWN,
     STATE_VENT,
-    STATE_POST_VENT,
+    STATE_ERROR,
     TRV_ON,
     TRV_OFF,
-    DEFAULT_GAIN,
-    DEFAULT_OFFSET,
-    TRV_MIN_TEMP,
-    TRV_MAX_TEMP,
-    DEFAULT_ADAPTIVE_LEARNING,
-    DEFAULT_UPDATE_INTERVAL,
-    MIN_GAIN,
-    MAX_GAIN,
-    MIN_OFFSET,
-    MAX_OFFSET,
-    LEARNING_CYCLES_REQUIRED,
-    MAX_GAIN_CHANGES_PER_HOUR,
+    DEFAULT_LEARNING_SPEED,
+    DEFAULT_LEARNING_CYCLES,
+    DEFAULT_DESIRED_OVERSHOOT,
+    DEFAULT_MIN_HEATING_DURATION,
+    DEFAULT_MAX_HEATING_DURATION,
+    DEFAULT_MAX_VALID_OVERSHOOT,
+    DEFAULT_COOLDOWN_DURATION,
+    HISTORY_SIZE,
     STORAGE_DIR,
     STORAGE_FILE,
+    SENSOR_OFFLINE_TIMEOUT,
+    TRV_OFFLINE_TIMEOUT,
+    TARGET_DEBOUNCE_DELAY,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
+# Learning algorithm constants
+SECONDS_PER_DEGREE_OVERSHOOT = 300  # Estimate: 300s heating ≈ 1°C overshoot
+CONSERVATIVE_ADJUSTMENT_FACTOR = 0.2  # 20% of error
+AGGRESSIVE_LARGE_ERROR_THRESHOLD = 0.5  # °C
+AGGRESSIVE_LARGE_ADJUSTMENT = 120  # seconds (2 min)
+AGGRESSIVE_SMALL_ADJUSTMENT = 60  # seconds (1 min)
+
 
 class RoomController:
-    """Stavový automat pro jednu místnost."""
+    """Stavový automat pro jednu místnost s ON/OFF řízením."""
 
     def __init__(
         self,
@@ -43,14 +51,15 @@ class RoomController:
         target_entity: str,
         trv_entities: list[dict],
         window_entities: list[str],
-        door_entities: list[str],
-        heating_water_temp_entity: str,
         hysteresis: float,
         vent_delay: int,
-        post_vent_duration: int,
-        gain: float = DEFAULT_GAIN,
-        offset: float = DEFAULT_OFFSET,
-        adaptive_learning: bool = DEFAULT_ADAPTIVE_LEARNING,
+        learning_speed: str = DEFAULT_LEARNING_SPEED,
+        learning_cycles_required: int = DEFAULT_LEARNING_CYCLES,
+        desired_overshoot: float = DEFAULT_DESIRED_OVERSHOOT,
+        min_heating_duration: int = DEFAULT_MIN_HEATING_DURATION,
+        max_heating_duration: int = DEFAULT_MAX_HEATING_DURATION,
+        max_valid_overshoot: float = DEFAULT_MAX_VALID_OVERSHOOT,
+        cooldown_duration: int = DEFAULT_COOLDOWN_DURATION,
     ):
         """Inicializace controlleru."""
         self._hass = hass
@@ -59,934 +68,776 @@ class RoomController:
         self._target_entity = target_entity
         self._trv_entities = trv_entities
         self._window_entities = window_entities
-        self._door_entities = door_entities
-        self._heating_water_temp_entity = heating_water_temp_entity
         self._hysteresis = hysteresis
         self._vent_delay = vent_delay
-        self._post_vent_duration = post_vent_duration
-        self._gain = gain
-        self._offset = offset
-        self._adaptive_learning = adaptive_learning
+        self._learning_speed = learning_speed
+        self._learning_cycles_required = learning_cycles_required
+        self._desired_overshoot = desired_overshoot
+        self._min_heating_duration = min_heating_duration
+        self._max_heating_duration = max_heating_duration
+        self._max_valid_overshoot = max_valid_overshoot
+        self._cooldown_duration = cooldown_duration
 
+        # Stavový automat
         self._state = STATE_IDLE
         self._window_opened_at = None
-        self._post_vent_timer = None
         
-        # Adaptivní učení - historie teplot
-        # 1 hodina při DEFAULT_UPDATE_INTERVAL (10s) = 360 vzorků
-        history_size = 60 * 60 // DEFAULT_UPDATE_INTERVAL
-        self._temp_history = deque(maxlen=history_size)
-        self._last_trv_target = None
-        self._commands_total = 0
+        # Učení a adaptace
+        self._is_learning = True
+        self._valid_cycles_count = 0
+        self._avg_heating_duration = None
+        self._time_offset = 0
+        self._avg_overshoot = None
+        self._last_learned = None
         
-        # Adaptivní učení - performance tracking
-        self._performance_history = deque(maxlen=100)
-        self._last_oscillation_log = 0
-        self._learning_paused_until = None
-        self._gain_changes_last_hour = deque(maxlen=10)
-        self._last_overshoot = None
+        # Aktuální cyklus
+        self._current_cycle = {}
+        self._heating_start_time = None
+        self._heating_start_temp = None
+        self._heating_target_temp = None
+        self._cooldown_start_time = None
+        self._cooldown_max_temp = None
+        
+        # Historie cyklů
+        self._history = []
+        
+        # Error handling
+        self._sensor_unavailable_since = None
+        self._trv_unavailable_since = {}
+        
+        # Target debounce
+        self._target_debounce_timer = None
+        self._last_target_value = None
+        
+        # Refresh callback (set by coordinator to avoid circular import)
+        self._refresh_callback = None
         
         # Načíst naučené parametry
         self._load_learned_params()
 
         _LOGGER.info(
-            f"TRV [{self._room_name}] initialized: "
+            f"TRV [{self._room_name}] initialized (ON/OFF mode): "
             f"hysteresis={self._hysteresis}°C, "
-            f"gain={self._gain}, offset={self._offset}, "
             f"vent_delay={self._vent_delay}s, "
-            f"post_vent_duration={self._post_vent_duration}s, "
-            f"adaptive_learning={self._adaptive_learning}"
+            f"learning_speed={self._learning_speed}, "
+            f"learning_cycles_required={self._learning_cycles_required}"
+        )
+
+    @property
+    def state(self) -> str:
+        """Aktuální stav."""
+        return self._state
+
+    @property
+    def is_learning(self) -> bool:
+        """Zda je v učícím režimu."""
+        return self._is_learning
+
+    @property
+    def valid_cycles_count(self) -> int:
+        """Počet validních naučených cyklů."""
+        return self._valid_cycles_count
+
+    @property
+    def avg_heating_duration(self) -> Optional[float]:
+        """Průměrná doba topení."""
+        return self._avg_heating_duration
+
+    @property
+    def time_offset(self) -> float:
+        """Časový offset pro prediktivní vypnutí."""
+        return self._time_offset
+
+    @property
+    def avg_overshoot(self) -> Optional[float]:
+        """Průměrný překmit."""
+        return self._avg_overshoot
+
+    @property
+    def last_cycle(self) -> dict:
+        """Poslední cyklus."""
+        if self._history:
+            return self._history[-1]
+        return {}
+
+    @property
+    def history(self) -> list:
+        """Historie cyklů."""
+        return self._history
+
+    @property
+    def heating_elapsed_seconds(self) -> Optional[float]:
+        """Uběhlá doba topení v sekundách."""
+        if self._heating_start_time:
+            return time.time() - self._heating_start_time
+        return None
+
+    @property
+    def heating_remaining_seconds(self) -> Optional[float]:
+        """Zbývající doba topení v sekundách (pouze v LEARNED režimu)."""
+        if not self._is_learning and self._heating_start_time and self._avg_heating_duration:
+            planned_duration = self._avg_heating_duration - self._time_offset
+            elapsed = time.time() - self._heating_start_time
+            return max(0, planned_duration - elapsed)
+        return None
+
+    def set_refresh_callback(self, callback):
+        """Set the callback for requesting refresh (avoids circular import)."""
+        self._refresh_callback = callback
+
+    def get_temperature(self) -> Optional[float]:
+        """Načíst aktuální teplotu (public method)."""
+        return self._get_temperature()
+
+    def get_target(self) -> Optional[float]:
+        """Načíst cílovou teplotu (public method)."""
+        return self._get_target()
+
+    def _load_learned_params(self):
+        """Načíst naučené parametry z úložiště."""
+        storage_path = os.path.join(
+            self._hass.config.path(STORAGE_DIR),
+            STORAGE_FILE
         )
         
-        # Vytvořit senzory
-        hass.loop.create_task(self._create_sensors())
+        if not os.path.exists(storage_path):
+            _LOGGER.info(f"TRV [{self._room_name}]: No learned parameters found, starting fresh")
+            return
+        
+        try:
+            with open(storage_path, 'r') as f:
+                data = json.load(f)
+            
+            room_data = data.get(self._room_name, {})
+            if room_data:
+                self._avg_heating_duration = room_data.get("avg_heating_duration")
+                self._time_offset = room_data.get("time_offset", 0)
+                self._is_learning = room_data.get("is_learning", True)
+                self._valid_cycles_count = room_data.get("valid_cycles_count", 0)
+                self._last_learned = room_data.get("last_learned")
+                self._avg_overshoot = room_data.get("avg_overshoot")
+                self._history = room_data.get("history", [])[-HISTORY_SIZE:]
+                
+                _LOGGER.info(
+                    f"TRV [{self._room_name}]: Loaded learned params: "
+                    f"avg_duration={self._avg_heating_duration}s, "
+                    f"time_offset={self._time_offset}s, "
+                    f"is_learning={self._is_learning}, "
+                    f"valid_cycles={self._valid_cycles_count}"
+                )
+        except Exception as e:
+            _LOGGER.error(f"TRV [{self._room_name}]: Failed to load learned params: {e}")
+
+    def _save_learned_params(self):
+        """Uložit naučené parametry do úložiště."""
+        storage_path = os.path.join(
+            self._hass.config.path(STORAGE_DIR),
+            STORAGE_FILE
+        )
+        
+        # Načíst existující data
+        data = {}
+        if os.path.exists(storage_path):
+            try:
+                with open(storage_path, 'r') as f:
+                    data = json.load(f)
+            except Exception as e:
+                _LOGGER.warning(f"TRV [{self._room_name}]: Failed to read existing storage: {e}")
+        
+        # Aktualizovat data pro tuto místnost
+        data[self._room_name] = {
+            "avg_heating_duration": self._avg_heating_duration,
+            "time_offset": self._time_offset,
+            "is_learning": self._is_learning,
+            "valid_cycles_count": self._valid_cycles_count,
+            "last_learned": self._last_learned,
+            "avg_overshoot": self._avg_overshoot,
+            "history": self._history[-HISTORY_SIZE:],  # Uložit max HISTORY_SIZE cyklů
+        }
+        
+        # Zajistit existenci adresáře
+        os.makedirs(os.path.dirname(storage_path), exist_ok=True)
+        
+        # Uložit
+        try:
+            with open(storage_path, 'w') as f:
+                json.dump(data, f, indent=2)
+            _LOGGER.debug(f"TRV [{self._room_name}]: Saved learned params")
+        except Exception as e:
+            _LOGGER.error(f"TRV [{self._room_name}]: Failed to save learned params: {e}")
 
     async def async_update(self):
-        """Hlavní update loop – volá se při změně libovolné entity."""
-        # 1. Načti aktuální hodnoty
+        """Hlavní update loop."""
+        # 1. Kontrola dostupnosti senzoru
+        if not await self._check_sensor_availability():
+            return
+        
+        # 2. Kontrola dostupnosti TRV
+        if not await self._check_trv_availability():
+            return
+        
+        # 3. Načíst aktuální hodnoty
         temp = self._get_temperature()
         target = self._get_target()
         
-        # Pokud ještě nejsou data, skipnout tento cyklus
         if temp is None or target is None:
             _LOGGER.debug(
-                f"TRV [{self._room_name}]: Čekám na data "
-                f"(temp={temp}, target={target}), skipuji update"
+                f"TRV [{self._room_name}]: Waiting for data "
+                f"(temp={temp}, target={target})"
             )
             return
         
+        # 4. Debounce target změny
+        if self._last_target_value != target:
+            await self._handle_target_change(target)
+            return
+        
+        # 5. Zkontrolovat okna
         window_open = self._any_window_open()
         
-        # Uložit do historie pro adaptivní učení
-        self._temp_history.append(temp)
-
-        # 2. Vyhodnoť stavový automat
-        new_state = self._evaluate_state(temp, target, window_open)
-
-        # 3. Pokud se stav změnil → přejdi
+        # 6. Vyhodnotit stavový automat
+        new_state = await self._evaluate_state(temp, target, window_open)
+        
+        # 7. Přejít do nového stavu pokud se změnil
         if new_state != self._state:
             await self._transition_to(new_state, temp, target)
-        # 4. NOVÉ: Pokud je v HEATING, průběžně aktualizuj target
-        elif new_state == STATE_HEATING:
-            await self._update_proportional_target(temp, target)
-        
-        # 5. Aktualizovat senzory
-        await self._update_sensors()
+        else:
+            # Pokračovat v aktuálním stavu
+            await self._continue_in_state(temp, target)
 
-    def _evaluate_state(self, temp: float, target: float, window_open: bool) -> str:
-        """Deterministická logika přechodů."""
+    async def _check_sensor_availability(self) -> bool:
+        """Zkontrolovat dostupnost teplotního senzoru."""
+        sensor_state = self._hass.states.get(self._temperature_entity)
+        
+        if sensor_state is None or sensor_state.state in ("unavailable", "unknown"):
+            if self._sensor_unavailable_since is None:
+                self._sensor_unavailable_since = time.time()
+                _LOGGER.warning(
+                    f"TRV [{self._room_name}]: Temperature sensor unavailable, waiting..."
+                )
+            
+            elapsed = time.time() - self._sensor_unavailable_since
+            if elapsed > SENSOR_OFFLINE_TIMEOUT:
+                if self._state != STATE_ERROR:
+                    _LOGGER.error(
+                        f"TRV [{self._room_name}]: Sensor offline > {SENSOR_OFFLINE_TIMEOUT}s! "
+                        "Switching to ERROR state."
+                    )
+                    await self._transition_to(STATE_ERROR, None, None)
+                return False
+            
+            return False
+        
+        # Senzor je dostupný, resetovat čítač
+        self._sensor_unavailable_since = None
+        return True
+
+    async def _check_trv_availability(self) -> bool:
+        """Zkontrolovat dostupnost TRV hlavic."""
+        for trv_config in self._trv_entities:
+            if not trv_config.get("enabled", True):
+                continue
+            
+            entity_id = trv_config["entity"]
+            trv_state = self._hass.states.get(entity_id)
+            
+            if trv_state is None or trv_state.state in ("unavailable", "unknown"):
+                if entity_id not in self._trv_unavailable_since:
+                    self._trv_unavailable_since[entity_id] = time.time()
+                    _LOGGER.warning(
+                        f"TRV [{self._room_name}]: TRV {entity_id} unavailable, waiting..."
+                    )
+                
+                elapsed = time.time() - self._trv_unavailable_since[entity_id]
+                if elapsed > TRV_OFFLINE_TIMEOUT:
+                    if self._state != STATE_ERROR:
+                        _LOGGER.error(
+                            f"TRV [{self._room_name}]: TRV {entity_id} offline > {TRV_OFFLINE_TIMEOUT}s! "
+                            "Switching to ERROR state."
+                        )
+                        await self._transition_to(STATE_ERROR, None, None)
+                    return False
+            else:
+                # TRV je dostupná, resetovat čítač
+                if entity_id in self._trv_unavailable_since:
+                    del self._trv_unavailable_since[entity_id]
+        
+        return True
+
+    async def _handle_target_change(self, new_target):
+        """Zpracovat změnu cílové teploty s debounce."""
+        self._last_target_value = new_target
+        
+        # Zrušit existující timer
+        if self._target_debounce_timer:
+            self._target_debounce_timer.cancel()
+        
+        # Spustit nový timer
+        self._target_debounce_timer = self._hass.loop.call_later(
+            TARGET_DEBOUNCE_DELAY,
+            lambda: asyncio.create_task(self._target_debounce_expired())
+        )
+        
+        _LOGGER.debug(
+            f"TRV [{self._room_name}]: Target changed to {new_target}°C, "
+            f"debouncing for {TARGET_DEBOUNCE_DELAY}s"
+        )
+
+    async def _target_debounce_expired(self):
+        """Debounce timer vypršel, aplikovat změnu."""
+        _LOGGER.info(
+            f"TRV [{self._room_name}]: Target debounce expired, applying new target"
+        )
+        
+        # Pokud jsme v COOLDOWN, invalidovat aktuální cyklus
+        if self._state == STATE_COOLDOWN:
+            _LOGGER.info(
+                f"TRV [{self._room_name}]: Target changed during COOLDOWN, "
+                "invalidating current cycle"
+            )
+            self._current_cycle["valid"] = False
+            self._current_cycle["invalidation_reason"] = "target_changed_during_cooldown"
+        
+        # Vynutit refresh pomocí callback
+        if self._refresh_callback:
+            await self._refresh_callback()
+        else:
+            _LOGGER.warning(
+                f"TRV [{self._room_name}]: Refresh callback not set, cannot request refresh"
+            )
+
+    async def _evaluate_state(self, temp: float, target: float, window_open: bool) -> str:
+        """Vyhodnotit který stav by měl být aktivní."""
+        # ERROR se drží dokud se entity nevrátí
+        if self._state == STATE_ERROR:
+            return STATE_ERROR
+        
         # VENT má přednost
         if window_open:
             if self._window_opened_at is None:
                 self._window_opened_at = time.time()
                 _LOGGER.info(f"TRV [{self._room_name}]: Window opened")
-
+            
             elapsed = time.time() - self._window_opened_at
             if elapsed >= self._vent_delay:
                 _LOGGER.debug(
                     f"TRV [{self._room_name}]: Window open for {elapsed:.0f}s "
-                    f"(>= {self._vent_delay}s) → triggering VENT"
+                    f"(>= {self._vent_delay}s) → VENT"
                 )
                 return STATE_VENT
         else:
             if self._window_opened_at is not None:
                 _LOGGER.info(f"TRV [{self._room_name}]: Window closed")
             self._window_opened_at = None
-
-        # POST_VENT nesmí skončit dřív než timer
-        if self._state == STATE_POST_VENT:
-            if self._post_vent_timer and not self._post_vent_timer_expired():
-                elapsed = time.time() - self._post_vent_timer
-                remaining = self._post_vent_duration - elapsed
-                _LOGGER.debug(
-                    f"TRV [{self._room_name}]: POST_VENT timer: "
-                    f"{elapsed:.0f}s elapsed, {remaining:.0f}s remaining"
-                )
-                return STATE_POST_VENT
-            else:
-                _LOGGER.info(
-                    f"TRV [{self._room_name}]: POST_VENT timer expired "
-                    f"({self._post_vent_duration}s) → evaluating heating"
-                )
-                # Timer vypršel → okamžitě vyhodnotit regulaci
-                return self._evaluate_heating(temp, target)
-
-        # Během VENT ignoruj teplotu
+        
+        # VENT režim - čekat na zavření okna
         if self._state == STATE_VENT:
             if not window_open:
-                return STATE_POST_VENT
+                # Okno se zavřelo, okamžitě vyhodnotit regulaci
+                return self._evaluate_heating(temp, target)
             return STATE_VENT
-
-        # Regulace (pouze IDLE/HEATING)
+        
+        # COOLDOWN režim - čekat na vypršení nebo pokles teploty
+        if self._state == STATE_COOLDOWN:
+            if self._cooldown_start_time:
+                elapsed = time.time() - self._cooldown_start_time
+                
+                # Sledovat maximální teplotu během cooldown
+                if self._cooldown_max_temp is None or temp > self._cooldown_max_temp:
+                    self._cooldown_max_temp = temp
+                
+                # Ukončit cooldown pokud:
+                # 1. Uplynula doba cooldown_duration
+                # 2. NEBO teplota začala klesat (peak byl dosažen)
+                if elapsed >= self._cooldown_duration:
+                    _LOGGER.info(
+                        f"TRV [{self._room_name}]: COOLDOWN duration expired "
+                        f"({elapsed:.0f}s >= {self._cooldown_duration}s)"
+                    )
+                    await self._finish_cooldown(temp, target)
+                    return self._evaluate_heating(temp, target)
+                elif self._cooldown_max_temp and temp < self._cooldown_max_temp - 0.05:
+                    _LOGGER.info(
+                        f"TRV [{self._room_name}]: Temperature dropping "
+                        f"(peak: {self._cooldown_max_temp:.1f}°C, current: {temp:.1f}°C), "
+                        "ending COOLDOWN early"
+                    )
+                    await self._finish_cooldown(temp, target)
+                    return self._evaluate_heating(temp, target)
+            
+            return STATE_COOLDOWN
+        
+        # HEATING režim - kontrola času nebo dosažení targetu
+        if self._state == STATE_HEATING:
+            if self._heating_start_time:
+                elapsed = time.time() - self._heating_start_time
+                
+                # Bezpečnostní vypnutí při překročení max_heating_duration
+                if elapsed > self._max_heating_duration:
+                    _LOGGER.error(
+                        f"TRV [{self._room_name}]: Heating too long ({elapsed/60:.1f} min)! "
+                        f"Forcing stop (limit: {self._max_heating_duration/60:.1f} min)."
+                    )
+                    return STATE_COOLDOWN
+                
+                # Rozhodnout podle fáze učení
+                if self._is_learning:
+                    # LEARNING: topíme dokud nedosáhneme targetu
+                    if temp >= target:
+                        _LOGGER.info(
+                            f"TRV [{self._room_name}]: Target reached in LEARNING mode "
+                            f"(temp={temp:.1f}°C >= target={target:.1f}°C) after {elapsed:.0f}s"
+                        )
+                        return STATE_COOLDOWN
+                else:
+                    # LEARNED: vypnout podle času
+                    planned_duration = self._avg_heating_duration - self._time_offset
+                    if elapsed >= planned_duration:
+                        _LOGGER.info(
+                            f"TRV [{self._room_name}]: Predictive shutdown "
+                            f"(elapsed={elapsed:.0f}s >= planned={planned_duration:.0f}s)"
+                        )
+                        return STATE_COOLDOWN
+            
+            return STATE_HEATING
+        
+        # IDLE nebo jiný stav - vyhodnotit regulaci
         return self._evaluate_heating(temp, target)
 
     def _evaluate_heating(self, temp: float, target: float) -> str:
-        """Vyhodnotí, zda má být zapnuto topení (s hysterezí pro změnu stavu)."""
+        """Vyhodnotit zda zapnout/vypnout topení."""
         lower_threshold = target - self._hysteresis
-        upper_threshold = target + self._hysteresis
-
+        
         if temp <= lower_threshold:
-            # Logovat jen pokud se stav mění
             if self._state != STATE_HEATING:
                 _LOGGER.debug(
-                    f"TRV [{self._room_name}]: Temperature {temp:.1f}°C "
-                    f"<= {lower_threshold:.1f}°C (target-hysteresis) → HEATING"
+                    f"TRV [{self._room_name}]: Temp {temp:.1f}°C "
+                    f"<= {lower_threshold:.1f}°C → HEATING"
                 )
             return STATE_HEATING
-        elif temp >= upper_threshold:
-            # Logovat jen pokud se stav mění
+        else:
             if self._state != STATE_IDLE:
                 _LOGGER.debug(
-                    f"TRV [{self._room_name}]: Temperature {temp:.1f}°C "
-                    f">= {upper_threshold:.1f}°C (target+hysteresis) → IDLE"
+                    f"TRV [{self._room_name}]: Temp {temp:.1f}°C "
+                    f"> {lower_threshold:.1f}°C → IDLE"
                 )
             return STATE_IDLE
 
-        # Zůstat v aktuálním stavu - nelogovat
-        return self._state  # Zůstat v aktuálním stavu
-    
-    def _calculate_proportional_target(
-        self, room_temp: float, desired_temp: float, trv_local_temp: float
-    ) -> float:
-        """
-        Vypočítá cílovou teplotu pro TRV pomocí proporcionální regulace.
-        
-        Args:
-            room_temp: Teplota v místnosti (externím senzorem)
-            desired_temp: Požadovaná teplota
-            trv_local_temp: Lokální teplota z TRV hlavice
-        
-        Returns:
-            Cílová teplota pro nastavení TRV (5-35°C)
-        """
-        # Sanity check vstupních hodnot
-        if not (-10 <= room_temp <= 50) or not (-10 <= desired_temp <= 50):
-            _LOGGER.warning(
-                f"TRV [{self._room_name}]: Invalid temperature values "
-                f"(room={room_temp}°C, desired={desired_temp}°C), "
-                f"using safe default"
-            )
-            return TRV_MIN_TEMP
-        
-        diff = desired_temp - room_temp
-        
-        # Proporcionální zesílení
-        target = diff * self._gain + self._offset + trv_local_temp
-        
-        # Clamp 5-35°C
-        clamped = max(TRV_MIN_TEMP, min(TRV_MAX_TEMP, target))
-        
-        _LOGGER.debug(
-            f"TRV [{self._room_name}]: Proportional calculation: "
-            f"diff={diff:.2f}°C, gain={self._gain}, offset={self._offset}, "
-            f"trv_local={trv_local_temp:.1f}°C → "
-            f"target={target:.1f}°C (clamped to {clamped:.1f}°C)"
-        )
-        
-        return clamped
-
-    async def _transition_to(self, new_state: str, temp: float, target: float):
-        """Provede přechod do nového stavu."""
+    async def _transition_to(self, new_state: str, temp: Optional[float], target: Optional[float]):
+        """Provést přechod do nového stavu."""
         old_state = self._state
         self._state = new_state
-
-        # Log
+        
         _LOGGER.info(
-            f"TRV [{self._room_name}]: {old_state.upper()} → {new_state.upper()} "
-            f"(temp={temp:.1f}°C, target={target:.1f}°C, "
-            f"hysteresis=±{self._hysteresis}°C)"
+            f"TRV [{self._room_name}]: {old_state.upper()} → {new_state.upper()}"
         )
-
+        
         # Akce podle nového stavu
         if new_state == STATE_HEATING:
-            await self._set_all_trv_proportional(temp, target)
-
+            await self._start_heating(temp, target)
+        
+        elif new_state == STATE_COOLDOWN:
+            await self._start_cooldown(temp, target, old_state)
+        
         elif new_state == STATE_IDLE:
             await self._set_all_trv(TRV_OFF)
-            
-            # Uložit performance data při přechodu HEATING → IDLE
-            # (ignorujeme přechody z VENT/POST_VENT)
-            if old_state == STATE_HEATING:
-                await self._save_performance_data(temp, target)
-                await self._check_and_apply_learning()
-
+        
         elif new_state == STATE_VENT:
+            # Pokud topíme, invalidovat cyklus
+            if old_state == STATE_HEATING:
+                _LOGGER.info(
+                    f"TRV [{self._room_name}]: Window opened during HEATING, "
+                    "invalidating cycle"
+                )
+                self._current_cycle["valid"] = False
+                self._current_cycle["invalidation_reason"] = "window_opened_during_heating"
+            elif old_state == STATE_COOLDOWN:
+                _LOGGER.info(
+                    f"TRV [{self._room_name}]: Window opened during COOLDOWN, "
+                    "invalidating cycle"
+                )
+                self._current_cycle["valid"] = False
+                self._current_cycle["invalidation_reason"] = "window_opened_during_cooldown"
+            
+            await self._set_all_trv(TRV_OFF)
+        
+        elif new_state == STATE_ERROR:
             await self._set_all_trv(TRV_OFF)
 
-        elif new_state == STATE_POST_VENT:
-            # TRV už jsou OFF ze stavu VENT
-            self._start_post_vent_timer()
+    async def _continue_in_state(self, temp: float, target: float):
+        """Pokračovat v aktuálním stavu (žádný přechod)."""
+        # V HEATING stavu neděláme nic speciálního
+        # V COOLDOWN měříme teplotu (už se děje v _evaluate_state)
+        pass
+
+    async def _start_heating(self, temp: float, target: float):
+        """Začít topení."""
+        self._heating_start_time = time.time()
+        self._heating_start_temp = temp
+        self._heating_target_temp = target
+        
+        # Inicializovat nový cyklus
+        self._current_cycle = {
+            "timestamp": int(self._heating_start_time),
+            "start_temp": temp,
+            "target": target,
+            "valid": True,  # Předpokládáme validitu, může být změněno
+        }
+        
+        await self._set_all_trv(TRV_ON)
+        
+        if self._is_learning:
+            _LOGGER.info(
+                f"TRV [{self._room_name}]: Started LEARNING cycle "
+                f"({self._valid_cycles_count}/{self._learning_cycles_required})"
+            )
+        else:
+            planned_duration = self._avg_heating_duration - self._time_offset
+            _LOGGER.info(
+                f"TRV [{self._room_name}]: Started LEARNED cycle "
+                f"(planned_duration={planned_duration:.0f}s)"
+            )
+
+    async def _start_cooldown(self, temp: float, target: float, old_state: str):
+        """Začít cooldown měření."""
+        self._cooldown_start_time = time.time()
+        self._cooldown_max_temp = temp
+        
+        # Uložit dobu topení
+        if self._heating_start_time:
+            heating_duration = self._cooldown_start_time - self._heating_start_time
+            self._current_cycle["heating_duration"] = heating_duration
+            self._current_cycle["stop_temp"] = temp
+            
+            _LOGGER.info(
+                f"TRV [{self._room_name}]: Heating stopped after {heating_duration:.0f}s, "
+                f"entering COOLDOWN"
+            )
+        
+        await self._set_all_trv(TRV_OFF)
+
+    async def _finish_cooldown(self, temp: float, target: float):
+        """Dokončit cooldown a uložit cyklus."""
+        if not self._current_cycle:
+            return
+        
+        # Vypočítat překmit
+        overshoot = (self._cooldown_max_temp or temp) - target
+        self._current_cycle["max_temp"] = self._cooldown_max_temp or temp
+        self._current_cycle["overshoot"] = overshoot
+        
+        # Validovat cyklus
+        is_valid = self._is_cycle_valid(self._current_cycle)
+        self._current_cycle["valid"] = is_valid
+        
+        # Uložit do historie
+        self._history.append(self._current_cycle)
+        if len(self._history) > HISTORY_SIZE:
+            self._history = self._history[-HISTORY_SIZE:]
+        
+        _LOGGER.info(
+            f"TRV [{self._room_name}]: Cycle finished - "
+            f"duration={self._current_cycle.get('heating_duration', 0):.0f}s, "
+            f"overshoot={overshoot:.2f}°C, valid={is_valid}"
+        )
+        
+        # Pokud je validní, aplikovat učení
+        if is_valid:
+            await self._apply_learning()
+        
+        # Uložit parametry
+        self._save_learned_params()
+        
+        # Reset proměnných
+        self._heating_start_time = None
+        self._cooldown_start_time = None
+        self._cooldown_max_temp = None
+        self._current_cycle = {}
+
+    def _is_cycle_valid(self, cycle: dict) -> bool:
+        """Zkontrolovat zda je cyklus validní pro učení."""
+        # Pokud byl manuálně invalidován (okno, změna targetu)
+        if not cycle.get("valid", True):
+            return False
+        
+        heating_duration = cycle.get("heating_duration", 0)
+        overshoot = cycle.get("overshoot", 0)
+        stop_temp = cycle.get("stop_temp", 0)
+        target = cycle.get("target", 0)
+        
+        # Kontroly
+        if heating_duration < self._min_heating_duration:
+            _LOGGER.debug(
+                f"TRV [{self._room_name}]: Cycle invalid - too short "
+                f"({heating_duration:.0f}s < {self._min_heating_duration}s)"
+            )
+            return False
+        
+        if heating_duration > self._max_heating_duration:
+            _LOGGER.debug(
+                f"TRV [{self._room_name}]: Cycle invalid - too long "
+                f"({heating_duration:.0f}s > {self._max_heating_duration}s)"
+            )
+            return False
+        
+        if stop_temp < target - 1.0:
+            _LOGGER.debug(
+                f"TRV [{self._room_name}]: Cycle invalid - didn't reach near target "
+                f"({stop_temp:.1f}°C < {target - 1.0:.1f}°C)"
+            )
+            return False
+        
+        if overshoot > self._max_valid_overshoot:
+            _LOGGER.debug(
+                f"TRV [{self._room_name}]: Cycle invalid - excessive overshoot "
+                f"({overshoot:.2f}°C > {self._max_valid_overshoot}°C)"
+            )
+            return False
+        
+        return True
+
+    async def _apply_learning(self):
+        """Aplikovat učení z validního cyklu."""
+        # Spočítat validní cykly
+        valid_cycles = [c for c in self._history if c.get("valid", False)]
+        self._valid_cycles_count = len(valid_cycles)
+        
+        if self._is_learning:
+            # Stále učíme
+            if self._valid_cycles_count >= self._learning_cycles_required:
+                # Máme dost cyklů, vypočítat parametry
+                durations = [c["heating_duration"] for c in valid_cycles]
+                overshoots = [c["overshoot"] for c in valid_cycles]
+                
+                self._avg_heating_duration = sum(durations) / len(durations)
+                self._avg_overshoot = sum(overshoots) / len(overshoots)
+                
+                # Vypočítat time_offset
+                self._time_offset = self._calculate_time_offset(
+                    self._avg_heating_duration,
+                    self._avg_overshoot
+                )
+                
+                self._is_learning = False
+                self._last_learned = datetime.now().isoformat()
+                
+                _LOGGER.info(
+                    f"TRV [{self._room_name}]: LEARNING COMPLETE! "
+                    f"avg_duration={self._avg_heating_duration:.0f}s, "
+                    f"avg_overshoot={self._avg_overshoot:.2f}°C, "
+                    f"time_offset={self._time_offset:.0f}s"
+                )
+        else:
+            # Už jsme naučení, adaptivně upravit time_offset
+            if valid_cycles:
+                last_cycle = valid_cycles[-1]
+                actual_overshoot = last_cycle["overshoot"]
+                
+                # Upravit time_offset
+                self._adjust_time_offset(actual_overshoot)
+
+    def _calculate_time_offset(self, avg_duration: float, avg_overshoot: float) -> float:
+        """Vypočítat počáteční time_offset."""
+        # Cíl: overshoot blízko desired_overshoot
+        overshoot_error = avg_overshoot - self._desired_overshoot
+        
+        # Konzervativní odhad: SECONDS_PER_DEGREE_OVERSHOOT na 1°C
+        time_offset = overshoot_error * SECONDS_PER_DEGREE_OVERSHOOT
+        
+        # Limit: max 50% z avg_duration
+        max_offset = avg_duration * 0.5
+        time_offset = max(-max_offset, min(max_offset, time_offset))
+        
+        return time_offset
+
+    def _adjust_time_offset(self, actual_overshoot: float):
+        """Adaptivně upravit time_offset podle skutečného překmitu."""
+        overshoot_error = actual_overshoot - self._desired_overshoot
+        
+        if self._learning_speed == "conservative":
+            # Postupná korekce s faktorem CONSERVATIVE_ADJUSTMENT_FACTOR
+            adjustment = overshoot_error * CONSERVATIVE_ADJUSTMENT_FACTOR * SECONDS_PER_DEGREE_OVERSHOOT
+        else:  # aggressive
+            # Rychlá korekce
+            if abs(overshoot_error) > AGGRESSIVE_LARGE_ERROR_THRESHOLD:
+                adjustment = overshoot_error * AGGRESSIVE_LARGE_ADJUSTMENT
+            else:
+                adjustment = overshoot_error * AGGRESSIVE_SMALL_ADJUSTMENT
+        
+        old_offset = self._time_offset
+        self._time_offset += adjustment
+        
+        # Limit: rozumné hodnoty
+        if self._avg_heating_duration:
+            max_offset = self._avg_heating_duration * 0.5
+            self._time_offset = max(-max_offset, min(max_offset, self._time_offset))
+        
+        _LOGGER.info(
+            f"TRV [{self._room_name}]: Adjusted time_offset: "
+            f"{old_offset:.0f}s → {self._time_offset:.0f}s "
+            f"(overshoot_error={overshoot_error:.2f}°C, mode={self._learning_speed})"
+        )
 
     async def _set_all_trv(self, command: dict[str, Any]):
-        """Nastaví všechny aktivní TRV (respektuje enable/disable)."""
+        """Nastavit všechny TRV hlavice."""
         mode = command["hvac_mode"]
         temp = command["temperature"]
-
+        
         active_count = sum(1 for trv in self._trv_entities if trv.get("enabled", True))
-
+        
         _LOGGER.info(
             f"TRV [{self._room_name}]: Setting {active_count} TRV(s) to "
             f"{mode.upper()} ({temp}°C)"
         )
-
+        
         for trv_config in self._trv_entities:
             if not trv_config.get("enabled", True):
                 continue
-
+            
             entity_id = trv_config["entity"]
-
-            _LOGGER.debug(
-                f"TRV [{self._room_name}]: Sending to {entity_id}: "
-                f"hvac_mode={mode}, temperature={temp}"
+            
+            await self._hass.services.async_call(
+                "climate",
+                "set_hvac_mode",
+                {"entity_id": entity_id, "hvac_mode": mode},
+                blocking=True,
             )
-
-            # Nastavit hvac_mode a temperature v jednom volání
+            
             await self._hass.services.async_call(
                 "climate",
                 "set_temperature",
-                {
-                    "entity_id": entity_id,
-                    "hvac_mode": mode,
-                    "temperature": round(temp, 1)
-                },
+                {"entity_id": entity_id, "temperature": temp},
                 blocking=True,
             )
-        
-        self._commands_total += active_count
-        
-    async def _set_all_trv_proportional(self, room_temp: float, desired_temp: float):
-        """Nastaví všechny TRV pomocí proporcionální regulace."""
-        active_trvs = [trv for trv in self._trv_entities if trv.get("enabled", True)]
-        active_count = len(active_trvs)
-        
-        if active_count == 0:
-            _LOGGER.warning(f"TRV [{self._room_name}]: No active TRVs to control")
-            return
-        
-        # Použít první TRV pro získání lokální teploty (všechny by měly být podobné)
-        first_trv = active_trvs[0]["entity"]
-        trv_local_temp = self._get_trv_local_temperature(first_trv)
-        
-        # Pokud není TRV teplota dostupná, skip tento update
-        if trv_local_temp is None:
-            _LOGGER.debug(
-                f"TRV [{self._room_name}]: TRV local temperature not available, "
-                f"skipping proportional heating setup"
-            )
-            return
-        
-        # Vypočítat cílovou teplotu
-        target_temp = self._calculate_proportional_target(
-            room_temp, desired_temp, trv_local_temp
-        )
-        
-        self._last_trv_target = target_temp
-        
-        _LOGGER.info(
-            f"TRV [{self._room_name}]: Setting {active_count} TRV(s) to "
-            f"HEAT mode with proportional target={target_temp:.1f}°C "
-            f"(room={room_temp:.1f}°C, desired={desired_temp:.1f}°C, "
-            f"trv_local={trv_local_temp:.1f}°C)"
-        )
-        
-        for trv_config in active_trvs:
-            entity_id = trv_config["entity"]
-            
-            _LOGGER.debug(
-                f"TRV [{self._room_name}]: Sending to {entity_id}: "
-                f"hvac_mode=heat, temperature={target_temp:.1f}°C"
-            )
-            
-            # Nastavit hvac_mode a proporcionální teplotu v jednom volání
-            await self._hass.services.async_call(
-                "climate",
-                "set_temperature",
-                {
-                    "entity_id": entity_id,
-                    "hvac_mode": "heat",
-                    "temperature": round(target_temp, 1)
-                },
-                blocking=True,
-            )
-        
-        self._commands_total += active_count
 
-    def _get_temperature(self) -> float | None:
-        """Načte aktuální teplotu."""
+    def _get_temperature(self) -> Optional[float]:
+        """Načíst aktuální teplotu."""
         state = self._hass.states.get(self._temperature_entity)
-        
-        if state is None:
-            _LOGGER.warning(
-                f"TRV [{self._room_name}]: Temperature entity "
-                f"{self._temperature_entity} ještě neexistuje (možná se načítá)"
-            )
-            return None
-        
-        if state.state in ("unknown", "unavailable"):
-            _LOGGER.debug(
-                f"TRV [{self._room_name}]: Temperature entity "
-                f"{self._temperature_entity} unavailable"
-            )
-            return None
-        
-        try:
-            return float(state.state)
-        except (ValueError, TypeError):
-            _LOGGER.error(
-                f"TRV [{self._room_name}]: Cannot parse temperature: {state.state}"
-            )
-            return None
-    
-    def _get_trv_local_temperature(self, entity_id: str) -> float | None:
-        """
-        Načte lokální teplotu z TRV hlavice.
-        
-        Args:
-            entity_id: ID entity TRV hlavice
-        
-        Returns:
-            Lokální teplota měřená TRV hlavicí
-        """
-        state = self._hass.states.get(entity_id)
-        
-        if state is None:
-            _LOGGER.debug(
-                f"TRV [{self._room_name}]: TRV entity {entity_id} ještě neexistuje"
-            )
-            return None
-        
-        # Zkusit získat current_temperature z atributů
-        trv_temp = state.attributes.get("current_temperature")
-        
-        if trv_temp is None:
-            _LOGGER.debug(
-                f"TRV [{self._room_name}]: TRV {entity_id} has no current_temperature, "
-                f"using room temperature as fallback"
-            )
-            return self._get_temperature()
-        
-        try:
-            temp = float(trv_temp)
-            _LOGGER.debug(
-                f"TRV [{self._room_name}]: TRV local temperature from {entity_id}: {temp:.1f}°C"
-            )
-            return temp
-        except (ValueError, TypeError):
-            _LOGGER.error(
-                f"TRV [{self._room_name}]: Cannot parse TRV temperature: {trv_temp}"
-            )
-            return self._get_temperature()
+        if state and state.state not in ("unavailable", "unknown"):
+            try:
+                return float(state.state)
+            except ValueError:
+                _LOGGER.error(
+                    f"TRV [{self._room_name}]: Invalid temperature value: {state.state}"
+                )
+        return None
 
-    def _get_target(self) -> float | None:
-        """Načte cílovou teplotu."""
+    def _get_target(self) -> Optional[float]:
+        """Načíst cílovou teplotu."""
         state = self._hass.states.get(self._target_entity)
-        
-        if state is None:
-            _LOGGER.warning(
-                f"TRV [{self._room_name}]: Target entity "
-                f"{self._target_entity} ještě neexistuje (možná se načítá)"
-            )
-            return None
-        
-        if state.state in ("unknown", "unavailable"):
-            _LOGGER.debug(
-                f"TRV [{self._room_name}]: Target entity "
-                f"{self._target_entity} unavailable"
-            )
-            return None
-        
-        try:
-            return float(state.state)
-        except (ValueError, TypeError):
-            _LOGGER.error(
-                f"TRV [{self._room_name}]: Cannot parse target: {state.state}"
-            )
-            return None
+        if state and state.state not in ("unavailable", "unknown"):
+            try:
+                return float(state.state)
+            except ValueError:
+                _LOGGER.error(
+                    f"TRV [{self._room_name}]: Invalid target value: {state.state}"
+                )
+        return None
 
     def _any_window_open(self) -> bool:
-        """Kontroluje, zda je nějaké okno otevřené."""
+        """Zkontrolovat zda je nějaké okno otevřeno."""
         for entity_id in self._window_entities:
             state = self._hass.states.get(entity_id)
             if state and state.state == "on":
                 return True
         return False
-
-    def _start_post_vent_timer(self):
-        """Spustí POST_VENT timer."""
-        self._post_vent_timer = time.time()
-
-    def _post_vent_timer_expired(self) -> bool:
-        """Zkontroluje, zda vypršel POST_VENT timer."""
-        if not self._post_vent_timer:
-            return True
-        return time.time() - self._post_vent_timer >= self._post_vent_duration
-    
-    def calculate_oscillation(self) -> float:
-        """
-        Vypočítá oscilaci teploty za poslední hodinu.
-        
-        Returns:
-            Poloviční rozpětí teplot (amplituda oscilace) v °C
-        """
-        # Minimálně 1 minuta dat při DEFAULT_UPDATE_INTERVAL (10s) = 6 vzorků
-        min_samples = 60 // DEFAULT_UPDATE_INTERVAL
-        if len(self._temp_history) < min_samples:
-            return 0.0
-        
-        recent_temps = list(self._temp_history)
-        oscillation = (max(recent_temps) - min(recent_temps)) / 2
-        
-        # Logovat jen každou hodinu
-        current_time = time.time()
-        if current_time - self._last_oscillation_log >= 3600:
-            _LOGGER.debug(
-                f"TRV [{self._room_name}]: Oscillation over {len(recent_temps)} samples: "
-                f"{oscillation:.2f}°C"
-            )
-            self._last_oscillation_log = current_time
-        
-        return oscillation
-    
-    def get_learned_gain(self) -> float | None:
-        """
-        Vrací naučený gain (placeholder pro budoucí ML).
-        
-        Returns:
-            Optimální gain nebo None pokud ještě není naučen
-        """
-        # Nahrazeno aktivním učením v _check_and_apply_learning
-        return None
-    
-    def recommend_gain_adjustment(self) -> float | None:
-        """
-        Doporučí úpravu gain na základě oscilací (placeholder pro budoucí ML).
-        
-        Returns:
-            Doporučený nový gain nebo None pokud není doporučení
-        """
-        # Nahrazeno aktivním učením v _check_and_apply_learning
-        return None
-    
-    async def _update_proportional_target(self, room_temp: float, desired_temp: float):
-        """Aktualizuje TRV target pokud se změnil (bez změny stavu)."""
-        active_trvs = [trv for trv in self._trv_entities if trv.get("enabled", True)]
-        
-        if not active_trvs:
-            return
-        
-        # Použít první TRV pro získání lokální teploty
-        first_trv = active_trvs[0]["entity"]
-        trv_local_temp = self._get_trv_local_temperature(first_trv)
-        
-        # Pokud není TRV teplota, skip
-        if trv_local_temp is None:
-            _LOGGER.debug(
-                f"TRV [{self._room_name}]: TRV local temperature not available, "
-                f"skipping proportional update"
-            )
-            return
-        
-        # Vypočítat nový target
-        new_target = self._calculate_proportional_target(
-            room_temp, desired_temp, trv_local_temp
-        )
-        
-        # Poslat příkaz jen pokud se target změnil významně (> 0.05°C)
-        if self._last_trv_target is None or abs(new_target - self._last_trv_target) > 0.05:
-            _LOGGER.debug(
-                f"TRV [{self._room_name}]: Target changed during HEATING: "
-                f"{self._last_trv_target:.1f}°C → {new_target:.1f}°C"
-            )
-            
-            self._last_trv_target = new_target
-            
-            # Poslat nový target na všechny TRV
-            for trv_config in active_trvs:
-                entity_id = trv_config["entity"]
-                
-                await self._hass.services.async_call(
-                    "climate",
-                    "set_temperature",
-                    {
-                        "entity_id": entity_id,
-                        "hvac_mode": "heat",
-                        "temperature": round(new_target, 1)
-                    },
-                    blocking=True,
-                )
-            
-            self._commands_total += len(active_trvs)
-    
-    async def _save_performance_data(self, room_temp: float, target_temp: float):
-        """Uloží data o topném cyklu."""
-        overshoot = room_temp - target_temp
-        oscillation = self.calculate_oscillation()
-        
-        performance_data = {
-            "timestamp": time.time(),
-            "room_temp": room_temp,
-            "target_temp": target_temp,
-            "overshoot": overshoot,
-            "oscillation": oscillation,
-            "gain": self._gain,
-            "offset": self._offset,
-        }
-        
-        self._performance_history.append(performance_data)
-        self._last_overshoot = overshoot
-        
-        _LOGGER.debug(
-            f"TRV [{self._room_name}]: Performance data saved - "
-            f"overshoot={overshoot:.2f}°C, oscillation={oscillation:.2f}°C, "
-            f"total_cycles={len(self._performance_history)}"
-        )
-    
-    async def _check_and_apply_learning(self):
-        """Zkontroluje zda je potřeba upravit gain/offset a aplikuje změny."""
-        if not self._adaptive_learning:
-            return
-        
-        # Potřebujeme alespoň LEARNING_CYCLES_REQUIRED cyklů
-        if len(self._performance_history) < LEARNING_CYCLES_REQUIRED:
-            _LOGGER.debug(
-                f"TRV [{self._room_name}]: Not enough cycles for learning "
-                f"({len(self._performance_history)}/{LEARNING_CYCLES_REQUIRED})"
-            )
-            return
-        
-        # Kontrola zda není učení pozastaveno
-        if self._learning_paused_until and time.time() < self._learning_paused_until:
-            remaining = int(self._learning_paused_until - time.time())
-            _LOGGER.debug(
-                f"TRV [{self._room_name}]: Learning paused for {remaining}s more"
-            )
-            return
-        
-        # Analyzovat posledních LEARNING_CYCLES_REQUIRED cyklů
-        recent_cycles = list(self._performance_history)[-LEARNING_CYCLES_REQUIRED:]
-        
-        avg_overshoot = sum(c["overshoot"] for c in recent_cycles) / len(recent_cycles)
-        avg_oscillation = sum(c["oscillation"] for c in recent_cycles) / len(recent_cycles)
-        
-        _LOGGER.info(
-            f"TRV [{self._room_name}]: Learning analysis - "
-            f"avg_overshoot={avg_overshoot:.2f}°C, avg_oscillation={avg_oscillation:.2f}°C"
-        )
-        
-        new_gain = self._gain
-        new_offset = self._offset
-        adjustment_made = False
-        
-        # Velká oscilace (>0.5°C)
-        if avg_oscillation > 0.5:
-            new_gain = self._gain * 0.90
-            adjustment_made = True
-            _LOGGER.info(
-                f"TRV [{self._room_name}]: High oscillation detected, reducing gain: "
-                f"{self._gain:.1f} → {new_gain:.1f}"
-            )
-        # Přestřelování (avg overshoot > 0.4°C)
-        elif avg_overshoot > 0.4:
-            new_gain = self._gain * 0.95
-            new_offset = self._offset - 0.1
-            adjustment_made = True
-            _LOGGER.info(
-                f"TRV [{self._room_name}]: Overshooting detected, adjusting: "
-                f"gain {self._gain:.1f} → {new_gain:.1f}, "
-                f"offset {self._offset:.1f} → {new_offset:.1f}"
-            )
-        # Nedosahování cíle (avg overshoot < -0.4°C)
-        elif avg_overshoot < -0.4:
-            new_gain = self._gain * 1.05
-            new_offset = self._offset + 0.1
-            adjustment_made = True
-            _LOGGER.info(
-                f"TRV [{self._room_name}]: Undershooting detected, adjusting: "
-                f"gain {self._gain:.1f} → {new_gain:.1f}, "
-                f"offset {self._offset:.1f} → {new_offset:.1f}"
-            )
-        # Dobrá stabilita ale pomalá reakce
-        elif avg_oscillation < 0.2 and abs(avg_overshoot) < 0.2:
-            new_gain = self._gain * 1.02
-            adjustment_made = True
-            _LOGGER.info(
-                f"TRV [{self._room_name}]: Good stability, slightly increasing gain: "
-                f"{self._gain:.1f} → {new_gain:.1f}"
-            )
-        
-        if adjustment_made:
-            # Ochrana proti přeučení - kontrola počtu změn za poslední hodinu
-            current_time = time.time()
-            
-            # Odstranit staré záznamy (starší než 1 hodina)
-            while (self._gain_changes_last_hour and 
-                   current_time - self._gain_changes_last_hour[0] > 3600):
-                self._gain_changes_last_hour.popleft()
-            
-            # Kontrola limitu
-            if len(self._gain_changes_last_hour) >= MAX_GAIN_CHANGES_PER_HOUR:
-                _LOGGER.warning(
-                    f"TRV [{self._room_name}]: Too many gain changes in last hour "
-                    f"({len(self._gain_changes_last_hour)}), pausing learning for 1 hour"
-                )
-                self._learning_paused_until = current_time + 3600
-                return
-            
-            # Clamp hodnoty do bezpečných limitů
-            new_gain = max(MIN_GAIN, min(MAX_GAIN, new_gain))
-            new_offset = max(MIN_OFFSET, min(MAX_OFFSET, new_offset))
-            
-            # Aplikovat změny
-            self._gain = new_gain
-            self._offset = new_offset
-            
-            # Zaznamenat změnu
-            self._gain_changes_last_hour.append(current_time)
-            
-            # Uložit persistentně
-            await self._save_learned_params()
-            
-            # Aktualizovat senzory
-            await self._update_sensors()
-            
-            _LOGGER.info(
-                f"TRV [{self._room_name}]: Applied new parameters - "
-                f"gain={self._gain:.1f}, offset={self._offset:.2f}"
-            )
-    
-    async def _save_learned_params(self):
-        """Uloží naučené parametry do .storage/"""
-        try:
-            # Získat cestu k config
-            config_path = self._hass.config.path()
-            storage_path = os.path.join(config_path, STORAGE_DIR, STORAGE_FILE)
-            
-            # Načíst existující data
-            data = {}
-            if os.path.exists(storage_path):
-                try:
-                    with open(storage_path, "r") as f:
-                        data = json.load(f)
-                except (json.JSONDecodeError, IOError) as e:
-                    _LOGGER.warning(
-                        f"TRV [{self._room_name}]: Could not read existing storage file: {e}"
-                    )
-            
-            # Aktualizovat data pro tuto místnost
-            data[self._room_name] = {
-                "gain": self._gain,
-                "offset": self._offset,
-                "last_updated": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                "cycles_count": len(self._performance_history),
-                "last_change_timestamp": int(time.time()),
-            }
-            
-            # Vytvořit adresář pokud neexistuje
-            os.makedirs(os.path.dirname(storage_path), exist_ok=True)
-            
-            # Uložit zpět
-            with open(storage_path, "w") as f:
-                json.dump(data, f, indent=2)
-            
-            _LOGGER.debug(
-                f"TRV [{self._room_name}]: Learned parameters saved to {storage_path}"
-            )
-            
-        except Exception as e:
-            _LOGGER.error(
-                f"TRV [{self._room_name}]: Failed to save learned parameters: {e}"
-            )
-    
-    def _load_learned_params(self):
-        """Načte naučené parametry při startu."""
-        try:
-            config_path = self._hass.config.path()
-            storage_path = os.path.join(config_path, STORAGE_DIR, STORAGE_FILE)
-            
-            if not os.path.exists(storage_path):
-                _LOGGER.debug(
-                    f"TRV [{self._room_name}]: No learned parameters file found"
-                )
-                return
-            
-            with open(storage_path, "r") as f:
-                data = json.load(f)
-            
-            if self._room_name in data:
-                room_data = data[self._room_name]
-                self._gain = room_data.get("gain", self._gain)
-                self._offset = room_data.get("offset", self._offset)
-                
-                _LOGGER.info(
-                    f"TRV [{self._room_name}]: Loaded learned parameters - "
-                    f"gain={self._gain:.1f}, offset={self._offset:.2f}, "
-                    f"last_updated={room_data.get('last_updated', 'unknown')}"
-                )
-            else:
-                _LOGGER.debug(
-                    f"TRV [{self._room_name}]: No learned parameters for this room"
-                )
-                
-        except Exception as e:
-            _LOGGER.warning(
-                f"TRV [{self._room_name}]: Could not load learned parameters: {e}"
-            )
-    
-    async def _create_sensors(self):
-        """Vytvoří senzory pro Home Assistant."""
-        try:
-            # Normalizovat jméno místnosti pro entity ID
-            room_slug = self._room_name.lower().replace(" ", "_")
-            
-            sensors = {
-                f"sensor.trv_{room_slug}_gain": {
-                    "state": self._gain,
-                    "attributes": {
-                        "friendly_name": f"TRV {self._room_name} Gain",
-                        "unit_of_measurement": None,
-                        "icon": "mdi:tune",
-                    },
-                },
-                f"sensor.trv_{room_slug}_offset": {
-                    "state": self._offset,
-                    "attributes": {
-                        "friendly_name": f"TRV {self._room_name} Offset",
-                        "unit_of_measurement": "°C",
-                        "icon": "mdi:thermometer-lines",
-                    },
-                },
-                f"sensor.trv_{room_slug}_oscillation": {
-                    "state": 0.0,
-                    "attributes": {
-                        "friendly_name": f"TRV {self._room_name} Oscillation",
-                        "unit_of_measurement": "°C",
-                        "icon": "mdi:wave",
-                    },
-                },
-                f"sensor.trv_{room_slug}_last_overshoot": {
-                    "state": 0.0,
-                    "attributes": {
-                        "friendly_name": f"TRV {self._room_name} Last Overshoot",
-                        "unit_of_measurement": "°C",
-                        "icon": "mdi:arrow-up-down",
-                    },
-                },
-                f"sensor.trv_{room_slug}_learning_cycles": {
-                    "state": 0,
-                    "attributes": {
-                        "friendly_name": f"TRV {self._room_name} Learning Cycles",
-                        "unit_of_measurement": "cycles",
-                        "icon": "mdi:counter",
-                    },
-                },
-                f"sensor.trv_{room_slug}_state": {
-                    "state": self._state,
-                    "attributes": {
-                        "friendly_name": f"TRV {self._room_name} State",
-                        "icon": "mdi:state-machine",
-                    },
-                },
-                f"sensor.trv_{room_slug}_last_trv_target": {
-                    "state": self._last_trv_target or 0.0,
-                    "attributes": {
-                        "friendly_name": f"TRV {self._room_name} Last TRV Target",
-                        "unit_of_measurement": "°C",
-                        "icon": "mdi:target",
-                    },
-                },
-                f"sensor.trv_{room_slug}_commands_total": {
-                    "state": self._commands_total,
-                    "attributes": {
-                        "friendly_name": f"TRV {self._room_name} Commands Total",
-                        "unit_of_measurement": "commands",
-                        "icon": "mdi:counter",
-                    },
-                },
-            }
-            
-            for entity_id, sensor_data in sensors.items():
-                self._hass.states.async_set(
-                    entity_id,
-                    sensor_data["state"],
-                    sensor_data["attributes"]
-                )
-            
-            _LOGGER.debug(
-                f"TRV [{self._room_name}]: Created {len(sensors)} sensors"
-            )
-            
-        except Exception as e:
-            _LOGGER.error(
-                f"TRV [{self._room_name}]: Failed to create sensors: {e}"
-            )
-    
-    async def _update_sensors(self):
-        """Aktualizuje hodnoty senzorů."""
-        try:
-            room_slug = self._room_name.lower().replace(" ", "_")
-            
-            # Aktualizovat všechny senzory
-            self._hass.states.async_set(
-                f"sensor.trv_{room_slug}_gain",
-                self._gain,
-                {"friendly_name": f"TRV {self._room_name} Gain", "icon": "mdi:tune"}
-            )
-            
-            self._hass.states.async_set(
-                f"sensor.trv_{room_slug}_offset",
-                self._offset,
-                {
-                    "friendly_name": f"TRV {self._room_name} Offset",
-                    "unit_of_measurement": "°C",
-                    "icon": "mdi:thermometer-lines"
-                }
-            )
-            
-            self._hass.states.async_set(
-                f"sensor.trv_{room_slug}_oscillation",
-                round(self.calculate_oscillation(), 2),
-                {
-                    "friendly_name": f"TRV {self._room_name} Oscillation",
-                    "unit_of_measurement": "°C",
-                    "icon": "mdi:wave"
-                }
-            )
-            
-            self._hass.states.async_set(
-                f"sensor.trv_{room_slug}_last_overshoot",
-                round(self._last_overshoot, 2) if self._last_overshoot is not None else 0.0,
-                {
-                    "friendly_name": f"TRV {self._room_name} Last Overshoot",
-                    "unit_of_measurement": "°C",
-                    "icon": "mdi:arrow-up-down"
-                }
-            )
-            
-            self._hass.states.async_set(
-                f"sensor.trv_{room_slug}_learning_cycles",
-                len(self._performance_history),
-                {
-                    "friendly_name": f"TRV {self._room_name} Learning Cycles",
-                    "unit_of_measurement": "cycles",
-                    "icon": "mdi:counter"
-                }
-            )
-            
-            self._hass.states.async_set(
-                f"sensor.trv_{room_slug}_state",
-                self._state,
-                {
-                    "friendly_name": f"TRV {self._room_name} State",
-                    "icon": "mdi:state-machine"
-                }
-            )
-            
-            self._hass.states.async_set(
-                f"sensor.trv_{room_slug}_last_trv_target",
-                round(self._last_trv_target, 1) if self._last_trv_target is not None else 0.0,
-                {
-                    "friendly_name": f"TRV {self._room_name} Last TRV Target",
-                    "unit_of_measurement": "°C",
-                    "icon": "mdi:target"
-                }
-            )
-            
-            self._hass.states.async_set(
-                f"sensor.trv_{room_slug}_commands_total",
-                self._commands_total,
-                {
-                    "friendly_name": f"TRV {self._room_name} Commands Total",
-                    "unit_of_measurement": "commands",
-                    "icon": "mdi:counter"
-                }
-            )
-            
-        except Exception as e:
-            _LOGGER.error(
-                f"TRV [{self._room_name}]: Failed to update sensors: {e}"
-            )
-
-    @property
-    def state(self) -> str:
-        """Vrací aktuální stav."""
-        return self._state
-    
-    @property
-    def gain(self) -> float:
-        """Vrací aktuální gain."""
-        return self._gain
-    
-    @property
-    def offset(self) -> float:
-        """Vrací aktuální offset."""
-        return self._offset
-    
-    @property
-    def last_trv_target(self) -> float | None:
-        """Vrací poslední vypočítanou cílovou teplotu pro TRV."""
-        return self._last_trv_target
-    
-    @property
-    def commands_total(self) -> int:
-        """Vrací celkový počet odeslaných příkazů."""
-        return self._commands_total
