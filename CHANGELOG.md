@@ -5,7 +5,7 @@ Všechny významné změny v projektu budou dokumentovány v tomto souboru.
 Formát vychází z [Keep a Changelog](https://keepachangelog.com/cs/1.0.0/),
 a projekt dodržuje [sémantické verzování](https://semver.org/lang/cs/).
 
-## [2.0.0] - 2026-01-12
+## [3.0.0] - 2026-01-12
 
 ### ⚠️ BREAKING CHANGES
 
@@ -18,7 +18,7 @@ Tato verze přináší **kompletní přepsání regulační logiky** z proporcio
 - ❌ **heating_water_temp_entity** - již není potřeba teplota vody z kotle
 - ❌ **current_temperature z TRV** - již se nepoužívá lokální teplota z hlavice
 - ❌ **POST_VENT stav** - odstraněn parametr `post_vent_duration`
-- ❌ **door_entities** - sloučeno s `window_entities`
+- ❌ **door_entities** - sloučeno s `window_entities` (zachována zpětná kompatibilita)
 - ❌ **Staré senzory:**
   - `sensor.trv_{room}_gain`
   - `sensor.trv_{room}_offset`
@@ -29,7 +29,7 @@ Tato verze přináší **kompletní přepsání regulační logiky** z proporcio
 
 ### Přidáno
 - ✅ **ON/OFF řízení:**
-  - TRV zapnutá: 30°C (změněno z 35°C)
+  - TRV zapnutá: 30°C
   - TRV vypnutá: 5°C
   - Žádná proporcionální regulace
 - ✅ **Učící režim (LEARNING):**
@@ -50,7 +50,7 @@ Tato verze přináší **kompletní přepsání regulační logiky** z proporcio
   - `STATE_ERROR` - senzor/TRV offline
 - ✅ **Debounce:**
   - Target: 15 sekund (ignoruje rychlé změny slideru)
-  - Okna: konfigurovatelný (výchozí: 120s)
+  - Okna: konfigurovatelný (výchozí: 120s) - **přejmenováno z `vent_delay` na `window_open_delay`**
 - ✅ **Error handling:**
   - Senzor offline > 2 min → ERROR
   - TRV offline > 5 min → ERROR
@@ -66,6 +66,7 @@ Tato verze přináší **kompletní přepsání regulační logiky** z proporcio
   - `max_heating_duration` - 900-10800s (výchozí: 7200s)
   - `max_valid_overshoot` - 1.0-5.0°C (výchozí: 3.0°C)
   - `cooldown_duration` - 600-1800s (výchozí: 1200s)
+  - `window_open_delay` - 30-600s (výchozí: 120s) - **přejmenováno z `vent_delay`**
 - ✅ **Nové senzory:**
   - `sensor.trv_regulator_{room}_state` - stav automatu + atributy (current_temp, target_temp, heating_elapsed/remaining)
   - `sensor.trv_regulator_{room}_learning` - stav učení + parametry (valid_cycles, avg_duration, time_offset, avg_overshoot)
@@ -76,19 +77,21 @@ Tato verze přináší **kompletní přepsání regulační logiky** z proporcio
 
 ### Změněno
 - ⚙️ **Update interval:** 30 sekund (pevně, změněno z 10s)
-- ⚙️ **TRV_ON teplota:** 30°C (změněno z 35°C)
+- ⚙️ **TRV_ON teplota:** 30°C
+- ⚙️ **TRV_OFF teplota:** 5°C
 - ⚙️ **Stavový automat:** IDLE, HEATING, COOLDOWN, VENT, ERROR (změněno z IDLE, HEATING, VENT, POST_VENT)
+- ⚙️ **Parametr `vent_delay`** přejmenován na **`window_open_delay`** (zachována zpětná kompatibilita)
 
-### Migrace z verze 0.x
+### Migrace z verze 0.x nebo 2.x
 
 1. **Záloha:** Poznamenej si názvy místností a entity
 2. **Odebrat:** Odstraň staré konfigurace TRV Regulator
-3. **Update:** Aktualizuj na verzi 2.0.0 přes HACS
+3. **Update:** Aktualizuj na verzi 3.0.0 přes HACS
 4. **Restart:** Restartuj Home Assistant
-5. **Přidat:** Přidej integraci znovu (NEZADÁVEJ `heating_water_temp_entity`)
+5. **Přidat:** Přidej integraci znovu (NEZADÁVEJ `heating_water_temp_entity`, `gain`, `offset`)
 6. **Naučit:** Počkej na naučení (prvních 10 cyklů)
 
-**Poznámka:** Naučené parametry z verze 0.x (gain/offset) **nelze převést** na nový systém.
+**Poznámka:** Naučené parametry z verze 0.x nebo 2.x (gain/offset) **nelze převést** na nový systém.
 
 ## [Unreleased]
 
