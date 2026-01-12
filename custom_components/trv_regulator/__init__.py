@@ -68,9 +68,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ]
 
     # Merge window_entities a door_entities (pro zpětnou kompatibilitu)
-    window_entities = entry.data.get("window_entities", [])
+    # Preferovat options pokud existují, jinak použít data
+    window_entities = entry.options.get("window_entities", entry.data.get("window_entities", []))
     door_entities = entry.data.get("door_entities", [])
     all_window_entities = list(window_entities) + list(door_entities)
+
+    # Helper funkce pro čtení z options nebo data
+    def get_config_value(key, default):
+        return entry.options.get(key, entry.data.get(key, default))
 
     room = RoomController(
         hass,
@@ -79,19 +84,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         target_entity=entry.data["target_entity"],
         trv_entities=trv_entities,
         window_entities=all_window_entities,
-        hysteresis=entry.data.get("hysteresis", 0.3),
-        vent_delay=entry.data.get("vent_delay", 120),
-        learning_speed=entry.data.get("learning_speed", DEFAULT_LEARNING_SPEED),
-        learning_cycles_required=entry.data.get("learning_cycles_required", DEFAULT_LEARNING_CYCLES),
-        desired_overshoot=entry.data.get("desired_overshoot", DEFAULT_DESIRED_OVERSHOOT),
-        min_heating_duration=entry.data.get("min_heating_duration", DEFAULT_MIN_HEATING_DURATION),
-        max_heating_duration=entry.data.get("max_heating_duration", DEFAULT_MAX_HEATING_DURATION),
-        max_valid_overshoot=entry.data.get("max_valid_overshoot", DEFAULT_MAX_VALID_OVERSHOOT),
-        cooldown_duration=entry.data.get("cooldown_duration", DEFAULT_COOLDOWN_DURATION),
+        hysteresis=get_config_value("hysteresis", 0.3),
+        vent_delay=get_config_value("vent_delay", 120),
+        learning_speed=get_config_value("learning_speed", DEFAULT_LEARNING_SPEED),
+        learning_cycles_required=get_config_value("learning_cycles_required", DEFAULT_LEARNING_CYCLES),
+        desired_overshoot=get_config_value("desired_overshoot", DEFAULT_DESIRED_OVERSHOOT),
+        min_heating_duration=get_config_value("min_heating_duration", DEFAULT_MIN_HEATING_DURATION),
+        max_heating_duration=get_config_value("max_heating_duration", DEFAULT_MAX_HEATING_DURATION),
+        max_valid_overshoot=get_config_value("max_valid_overshoot", DEFAULT_MAX_VALID_OVERSHOOT),
+        cooldown_duration=get_config_value("cooldown_duration", DEFAULT_COOLDOWN_DURATION),
     )
 
     # Vytvoř coordinator
     coordinator = TrvRegulatorCoordinator(hass, room)
+
+    # Set refresh callback to avoid circular import
+    room.set_refresh_callback(coordinator.async_request_refresh)
 
     # Track změny relevantních entit
     # Target entity má debounce přímo v room_controller

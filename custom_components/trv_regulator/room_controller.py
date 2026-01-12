@@ -32,6 +32,13 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Learning algorithm constants
+SECONDS_PER_DEGREE_OVERSHOOT = 300  # Estimate: 300s heating ≈ 1°C overshoot
+CONSERVATIVE_ADJUSTMENT_FACTOR = 0.2  # 20% of error
+AGGRESSIVE_LARGE_ERROR_THRESHOLD = 0.5  # °C
+AGGRESSIVE_LARGE_ADJUSTMENT = 120  # seconds (2 min)
+AGGRESSIVE_SMALL_ADJUSTMENT = 60  # seconds (1 min)
+
 
 class RoomController:
     """Stavový automat pro jednu místnost s ON/OFF řízením."""
@@ -102,6 +109,9 @@ class RoomController:
         self._target_debounce_timer = None
         self._last_target_value = None
         
+        # Refresh callback (set by coordinator to avoid circular import)
+        self._refresh_callback = None
+        
         # Načíst naučené parametry
         self._load_learned_params()
 
@@ -170,6 +180,18 @@ class RoomController:
             elapsed = time.time() - self._heating_start_time
             return max(0, planned_duration - elapsed)
         return None
+
+    def set_refresh_callback(self, callback):
+        """Set the callback for requesting refresh (avoids circular import)."""
+        self._refresh_callback = callback
+
+    def get_temperature(self) -> Optional[float]:
+        """Načíst aktuální teplotu (public method)."""
+        return self._get_temperature()
+
+    def get_target(self) -> Optional[float]:
+        """Načíst cílovou teplotu (public method)."""
+        return self._get_target()
 
     def _load_learned_params(self):
         """Načíst naučené parametry z úložiště."""
@@ -376,12 +398,13 @@ class RoomController:
             self._current_cycle["valid"] = False
             self._current_cycle["invalidation_reason"] = "target_changed_during_cooldown"
         
-        # Vynutit refresh
-        from .coordinator import TrvRegulatorCoordinator
-        for entry_id, coordinator in self._hass.data.get("trv_regulator", {}).items():
-            if isinstance(coordinator, TrvRegulatorCoordinator) and coordinator.room == self:
-                await coordinator.async_request_refresh()
-                break
+        # Vynutit refresh pomocí callback
+        if self._refresh_callback:
+            await self._refresh_callback()
+        else:
+            _LOGGER.warning(
+                f"TRV [{self._room_name}]: Refresh callback not set, cannot request refresh"
+            )
 
     async def _evaluate_state(self, temp: float, target: float, window_open: bool) -> str:
         """Vyhodnotit který stav by měl být aktivní."""
@@ -716,11 +739,10 @@ class RoomController:
     def _calculate_time_offset(self, avg_duration: float, avg_overshoot: float) -> float:
         """Vypočítat počáteční time_offset."""
         # Cíl: overshoot blízko desired_overshoot
-        # Odhad: ~300s topení = 1°C překmit
         overshoot_error = avg_overshoot - self._desired_overshoot
         
-        # Konzervativní odhad: 300s na 1°C
-        time_offset = overshoot_error * 300
+        # Konzervativní odhad: SECONDS_PER_DEGREE_OVERSHOOT na 1°C
+        time_offset = overshoot_error * SECONDS_PER_DEGREE_OVERSHOOT
         
         # Limit: max 50% z avg_duration
         max_offset = avg_duration * 0.5
@@ -733,14 +755,14 @@ class RoomController:
         overshoot_error = actual_overshoot - self._desired_overshoot
         
         if self._learning_speed == "conservative":
-            # Postupná korekce 20%
-            adjustment = overshoot_error * 0.2 * 300
+            # Postupná korekce s faktorem CONSERVATIVE_ADJUSTMENT_FACTOR
+            adjustment = overshoot_error * CONSERVATIVE_ADJUSTMENT_FACTOR * SECONDS_PER_DEGREE_OVERSHOOT
         else:  # aggressive
             # Rychlá korekce
-            if abs(overshoot_error) > 0.5:
-                adjustment = overshoot_error * 120  # +2 min
+            if abs(overshoot_error) > AGGRESSIVE_LARGE_ERROR_THRESHOLD:
+                adjustment = overshoot_error * AGGRESSIVE_LARGE_ADJUSTMENT
             else:
-                adjustment = overshoot_error * 60  # +1 min
+                adjustment = overshoot_error * AGGRESSIVE_SMALL_ADJUSTMENT
         
         old_offset = self._time_offset
         self._time_offset += adjustment

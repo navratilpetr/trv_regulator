@@ -136,14 +136,11 @@ class TrvRegulatorOptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(self, user_input=None):
         """Zobrazit formulář pro úpravu parametrů."""
         if user_input is not None:
-            # Aktualizovat data config entry
-            self.hass.config_entries.async_update_entry(
-                self.config_entry,
-                data={**self.config_entry.data, **user_input}
-            )
-            return self.async_create_entry(title="", data={})
+            # Uložit do options (správný způsob)
+            return self.async_create_entry(title="", data=user_input)
 
-        # Načíst aktuální hodnoty
+        # Načíst aktuální hodnoty z options nebo fallback na data
+        current_options = self.config_entry.options
         current_data = self.config_entry.data
 
         return self.async_show_form(
@@ -152,7 +149,7 @@ class TrvRegulatorOptionsFlow(config_entries.OptionsFlow):
                 {
                     vol.Optional(
                         "window_entities",
-                        default=current_data.get("window_entities", [])
+                        default=current_options.get("window_entities", current_data.get("window_entities", []))
                     ): selector.EntitySelector(
                         selector.EntitySelectorConfig(
                             domain="binary_sensor", multiple=True
@@ -160,15 +157,15 @@ class TrvRegulatorOptionsFlow(config_entries.OptionsFlow):
                     ),
                     vol.Optional(
                         "hysteresis",
-                        default=current_data.get("hysteresis", DEFAULT_HYSTERESIS)
+                        default=current_options.get("hysteresis", current_data.get("hysteresis", DEFAULT_HYSTERESIS))
                     ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=2.0)),
                     vol.Optional(
                         "vent_delay",
-                        default=current_data.get("vent_delay", DEFAULT_VENT_DELAY)
+                        default=current_options.get("vent_delay", current_data.get("vent_delay", DEFAULT_VENT_DELAY))
                     ): vol.All(vol.Coerce(int), vol.Range(min=30, max=600)),
                     vol.Optional(
                         "learning_speed",
-                        default=current_data.get("learning_speed", DEFAULT_LEARNING_SPEED)
+                        default=current_options.get("learning_speed", current_data.get("learning_speed", DEFAULT_LEARNING_SPEED))
                     ): selector.SelectSelector(
                         selector.SelectSelectorConfig(
                             options=["conservative", "aggressive"],
@@ -177,27 +174,27 @@ class TrvRegulatorOptionsFlow(config_entries.OptionsFlow):
                     ),
                     vol.Optional(
                         "learning_cycles_required",
-                        default=current_data.get("learning_cycles_required", DEFAULT_LEARNING_CYCLES)
+                        default=current_options.get("learning_cycles_required", current_data.get("learning_cycles_required", DEFAULT_LEARNING_CYCLES))
                     ): vol.All(vol.Coerce(int), vol.Range(min=5, max=30)),
                     vol.Optional(
                         "desired_overshoot",
-                        default=current_data.get("desired_overshoot", DEFAULT_DESIRED_OVERSHOOT)
+                        default=current_options.get("desired_overshoot", current_data.get("desired_overshoot", DEFAULT_DESIRED_OVERSHOOT))
                     ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=0.5)),
                     vol.Optional(
                         "min_heating_duration",
-                        default=current_data.get("min_heating_duration", DEFAULT_MIN_HEATING_DURATION)
+                        default=current_options.get("min_heating_duration", current_data.get("min_heating_duration", DEFAULT_MIN_HEATING_DURATION))
                     ): vol.All(vol.Coerce(int), vol.Range(min=60, max=600)),
                     vol.Optional(
                         "max_heating_duration",
-                        default=current_data.get("max_heating_duration", DEFAULT_MAX_HEATING_DURATION)
+                        default=current_options.get("max_heating_duration", current_data.get("max_heating_duration", DEFAULT_MAX_HEATING_DURATION))
                     ): vol.All(vol.Coerce(int), vol.Range(min=900, max=10800)),
                     vol.Optional(
                         "max_valid_overshoot",
-                        default=current_data.get("max_valid_overshoot", DEFAULT_MAX_VALID_OVERSHOOT)
+                        default=current_options.get("max_valid_overshoot", current_data.get("max_valid_overshoot", DEFAULT_MAX_VALID_OVERSHOOT))
                     ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=5.0)),
                     vol.Optional(
                         "cooldown_duration",
-                        default=current_data.get("cooldown_duration", DEFAULT_COOLDOWN_DURATION)
+                        default=current_options.get("cooldown_duration", current_data.get("cooldown_duration", DEFAULT_COOLDOWN_DURATION))
                     ): vol.All(vol.Coerce(int), vol.Range(min=600, max=1800)),
                 }
             ),

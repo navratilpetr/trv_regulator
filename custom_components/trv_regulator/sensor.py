@@ -64,8 +64,8 @@ class TrvStateSensor(TrvBaseSensor):
         room = self.coordinator.room
         
         # Načíst aktuální teploty
-        temp = room._get_temperature()
-        target = room._get_target()
+        temp = room.get_temperature()
+        target = room.get_target()
         
         attrs = {
             "current_temp": temp,
