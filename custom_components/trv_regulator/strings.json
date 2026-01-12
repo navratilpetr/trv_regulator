@@ -10,26 +10,53 @@
       },
       "entities": {
         "title": "Povinné entity",
-        "description": "Vyberte povinné entity",
+        "description": "Vyberte povinné entity pro ON/OFF řízení s učením",
         "data": {
-          "temperature_entity": "Senzor teploty",
-          "target_entity": "Cílová teplota",
-          "trv_entities": "TRV hlavice",
-          "heating_water_temp_entity": "Teplota topné vody"
+          "temperature_entity": "Senzor teploty pokoje",
+          "target_entity": "Cílová teplota (input_number)",
+          "trv_entities": "TRV hlavice (climate)"
         }
       },
       "optional": {
-        "title": "Volitelné entity",
-        "description": "Volitelné entity a parametry",
+        "title": "Volitelné nastavení",
+        "description": "Volitelné entity a parametry učení",
         "data": {
-          "window_entities": "Okna",
-          "door_entities": "Dveře",
-          "hysteresis": "Hystereze (°C)",
-          "vent_delay": "Zpoždění větrání (s)",
-          "post_vent_duration": "Trvání post-ventilace (s)",
-          "gain": "Proporcionální zesílení (gain, 10-80)",
-          "offset": "Offset (-3.0 až +3.0)",
-          "adaptive_learning": "Aktivovat adaptivní učení"
+          "window_entities": "Okna (binary_sensor)",
+          "hysteresis": "Hystereze (°C, 0.0-2.0)",
+          "window_open_delay": "Zpoždění větrání (s, 30-600)",
+          "learning_speed": "Rychlost učení (conservative/aggressive)",
+          "learning_cycles_required": "Požadovaný počet cyklů (5-30)",
+          "desired_overshoot": "Žádoucí překmit (°C, 0.0-0.5)",
+          "min_heating_duration": "Min. doba topení (s, 60-600)",
+          "max_heating_duration": "Max. doba topení (s, 900-10800)",
+          "max_valid_overshoot": "Max. validní překmit (°C, 1.0-5.0)",
+          "cooldown_duration": "Doba cooldown (s, 600-1800)"
+        }
+      }
+    },
+    "error": {
+      "unknown": "Neznámá chyba"
+    },
+    "abort": {
+      "already_configured": "Tato místnost je již nakonfigurována"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Upravit nastavení",
+        "description": "Změňte parametry bez odebrání integrace",
+        "data": {
+          "window_entities": "Okna (binary_sensor)",
+          "hysteresis": "Hystereze (°C, 0.0-2.0)",
+          "window_open_delay": "Zpoždění větrání (s, 30-600)",
+          "learning_speed": "Rychlost učení (conservative/aggressive)",
+          "learning_cycles_required": "Požadovaný počet cyklů (5-30)",
+          "desired_overshoot": "Žádoucí překmit (°C, 0.0-0.5)",
+          "min_heating_duration": "Min. doba topení (s, 60-600)",
+          "max_heating_duration": "Max. doba topení (s, 900-10800)",
+          "max_valid_overshoot": "Max. validní překmit (°C, 1.0-5.0)",
+          "cooldown_duration": "Doba cooldown (s, 600-1800)"
         }
       }
     }

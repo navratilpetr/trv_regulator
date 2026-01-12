@@ -52,7 +52,7 @@ class RoomController:
         trv_entities: list[dict],
         window_entities: list[str],
         hysteresis: float,
-        vent_delay: int,
+        window_open_delay: int,
         learning_speed: str = DEFAULT_LEARNING_SPEED,
         learning_cycles_required: int = DEFAULT_LEARNING_CYCLES,
         desired_overshoot: float = DEFAULT_DESIRED_OVERSHOOT,
@@ -69,7 +69,7 @@ class RoomController:
         self._trv_entities = trv_entities
         self._window_entities = window_entities
         self._hysteresis = hysteresis
-        self._vent_delay = vent_delay
+        self._window_open_delay = window_open_delay
         self._learning_speed = learning_speed
         self._learning_cycles_required = learning_cycles_required
         self._desired_overshoot = desired_overshoot
@@ -118,7 +118,7 @@ class RoomController:
         _LOGGER.info(
             f"TRV [{self._room_name}] initialized (ON/OFF mode): "
             f"hysteresis={self._hysteresis}°C, "
-            f"vent_delay={self._vent_delay}s, "
+            f"window_open_delay={self._window_open_delay}s, "
             f"learning_speed={self._learning_speed}, "
             f"learning_cycles_required={self._learning_cycles_required}"
         )
@@ -419,10 +419,10 @@ class RoomController:
                 _LOGGER.info(f"TRV [{self._room_name}]: Window opened")
             
             elapsed = time.time() - self._window_opened_at
-            if elapsed >= self._vent_delay:
+            if elapsed >= self._window_open_delay:
                 _LOGGER.debug(
                     f"TRV [{self._room_name}]: Window open for {elapsed:.0f}s "
-                    f"(>= {self._vent_delay}s) → VENT"
+                    f"(>= {self._window_open_delay}s) → VENT"
                 )
                 return STATE_VENT
         else:
