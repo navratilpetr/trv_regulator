@@ -5,6 +5,20 @@ Všechny významné změny v projektu budou dokumentovány v tomto souboru.
 Formát vychází z [Keep a Changelog](https://keepachangelog.com/cs/1.0.0/),
 a projekt dodržuje [sémantické verzování](https://semver.org/lang/cs/).
 
+## [3.0.2] - 2026-01-13
+
+### Opraveno
+- 🐛 **Options Flow nefunkční** - opravena chyba "AttributeError: property 'config_entry' has no setter"
+  - Odstraněn problematický `__init__` v `TrvRegulatorOptionsFlow`
+  - Použit modernější přístup - parent class se postará o inicializaci
+  - Options flow nyní správně funguje v UI (Nastavení → Možnosti ⚙️)
+
+### Změněno
+- ⚙️ **TRV_ON teplota změněna z 30°C na 35°C**
+  - Vyšší teplota zajišťuje spolehlivější zapnutí topení
+  - Mode "heat" je vždy explicitně posílán spolu s teplotou
+  - Testováno a ověřeno v produkci
+
 ## [3.0.0] - 2026-01-12
 
 ### ⚠️ BREAKING CHANGES

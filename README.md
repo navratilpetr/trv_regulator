@@ -4,7 +4,7 @@ Custom integrace pro Home Assistant - **ON/OFF řízení s adaptivním učením*
 
 ## ✨ Vlastnosti
 
-- **ON/OFF řízení:** TRV buď zapnutá (30°C) nebo vypnutá (5°C) - žádná proporcionální regulace
+- **ON/OFF řízení:** TRV buď zapnutá (35°C) nebo vypnutá (5°C) - žádná proporcionální regulace
 - **Učící režim:** Prvních 10 cyklů měří dobu potřebnou k ohřátí místnosti
 - **Prediktivní vypínání:** Po naučení vypíná podle času (ne teploty) aby minimalizoval překmit
 - **Adaptivní úprava:** Průběžně upravuje timing podle skutečného překmitu
@@ -70,7 +70,7 @@ Integrace používá **dvoustupňové ON/OFF řízení** s časovým prediktivn�
 #### Fáze 1: LEARNING (prvních X cyklů)
 
 ```
-1. Zapne TRV na 30°C
+1. Zapne TRV na 35°C
 2. Topí dokud teplota nedosáhne targetu
 3. Měří kolik to trvalo (heating_duration)
 4. Vypne TRV na 5°C
@@ -84,7 +84,7 @@ Integrace používá **dvoustupňové ON/OFF řízení** s časovým prediktivn�
 #### Fáze 2: LEARNED (po naučení)
 
 ```
-1. Zapne TRV na 30°C
+1. Zapne TRV na 35°C
 2. Vypne po čase: avg_heating_duration - time_offset
    (NEčeká na dosažení targetu!)
 3. Měří skutečný překmit
@@ -143,7 +143,7 @@ ERROR
 
 ### Stavy:
 - **idle** - Teplota OK, TRV vypnutá (5°C)
-- **heating** - Aktivně topí, TRV zapnutá (30°C)
+- **heating** - Aktivně topí, TRV zapnutá (35°C)
 - **cooldown** - Po vypnutí, měří překmit (20 min), TRV vypnutá (5°C)
 - **vent** - Okno otevřeno > delay, TRV vypnutá (5°C)
 - **error** - Senzor/TRV offline, TRV vypnutá (5°C)
@@ -306,7 +306,7 @@ Naučené parametry se ukládají do `.storage/trv_regulator_learned_params.json
 - ❌ **Odstraněno:** Využití `current_temperature` z TRV hlavice
 - ❌ **Odstraněno:** State `POST_VENT`
 - ❌ **Odstraněno:** Senzory `gain`, `offset`, `oscillation`
-- ✅ **Nové:** ON/OFF řízení (30°C / 5°C)
+- ✅ **Nové:** ON/OFF řízení (35°C / 5°C)
 - ✅ **Nové:** Učící režim + prediktivní vypínání
 - ✅ **Nové:** Adaptivní úprava time_offset
 - ✅ **Nové:** Senzory `state`, `learning`, `last_cycle`, `history`

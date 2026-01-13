@@ -129,10 +129,6 @@ class TrvRegulatorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class TrvRegulatorOptionsFlow(config_entries.OptionsFlow):
     """Options flow pro úpravu konfigurace TRV Regulator."""
 
-    def __init__(self, config_entry):
-        """Inicializace options flow."""
-        self.config_entry = config_entry
-
     async def async_step_init(self, user_input=None):
         """Zobrazit formulář pro úpravu parametrů."""
         if user_input is not None:
