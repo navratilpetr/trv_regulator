@@ -39,6 +39,8 @@ CONSERVATIVE_ADJUSTMENT_FACTOR = 0.2  # 20% of error
 AGGRESSIVE_LARGE_ERROR_THRESHOLD = 0.5  # °C
 AGGRESSIVE_LARGE_ADJUSTMENT = 120  # seconds (2 min)
 AGGRESSIVE_SMALL_ADJUSTMENT = 60  # seconds (1 min)
+SIGNIFICANT_DURATION_CHANGE = 10  # seconds - log when avg_duration changes by this much
+SIGNIFICANT_OFFSET_CHANGE = 5  # seconds - log when time_offset changes by this much
 
 
 class RoomController:
@@ -224,6 +226,12 @@ class RoomController:
                 
                 # Načíst performance_history
                 performance_data = room_data.get("performance_history", [])
+                if len(performance_data) > self._learning_cycles_required:
+                    _LOGGER.warning(
+                        f"TRV [{self._room_name}]: Performance history truncated from "
+                        f"{len(performance_data)} to {self._learning_cycles_required} cycles "
+                        "(learning_cycles_required changed)"
+                    )
                 self._performance_history = deque(
                     performance_data,
                     maxlen=self._learning_cycles_required
@@ -755,11 +763,11 @@ class RoomController:
                 )
                 self._is_learning = False
             else:
-                # Kontinuální úprava - logovat jen pokud je změna > 10s nebo > 5%
+                # Kontinuální úprava - logovat jen pokud je změna > SIGNIFICANT_*_CHANGE
                 duration_change = abs(new_avg_duration - self._avg_heating_duration)
                 offset_change = abs(new_time_offset - self._time_offset)
                 
-                if duration_change > 10 or offset_change > 5:
+                if duration_change > SIGNIFICANT_DURATION_CHANGE or offset_change > SIGNIFICANT_OFFSET_CHANGE:
                     _LOGGER.info(
                         f"TRV [{self._room_name}]: Parameters updated: "
                         f"avg_duration {self._avg_heating_duration:.0f}s → {new_avg_duration:.0f}s, "
@@ -772,7 +780,7 @@ class RoomController:
             self._avg_overshoot = new_avg_overshoot
             self._time_offset = new_time_offset
             self._last_learned = datetime.now().isoformat()
-        elif self._is_learning and not self._avg_heating_duration:
+        elif self._is_learning and self._avg_heating_duration is None:
             # Stále učíme a nemáme ještě dost cyklů - neděláme nic
             _LOGGER.debug(
                 f"TRV [{self._room_name}]: Learning in progress "
