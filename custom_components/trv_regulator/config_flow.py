@@ -123,7 +123,7 @@ class TrvRegulatorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     def async_get_options_flow(config_entry):
         """Získat options flow pro úpravu konfigurace."""
-        return TrvRegulatorOptionsFlow(config_entry)
+        return TrvRegulatorOptionsFlow()
 
 
 class TrvRegulatorOptionsFlow(config_entries.OptionsFlow):
