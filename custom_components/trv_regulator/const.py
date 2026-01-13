@@ -8,7 +8,7 @@ STATE_VENT = "vent"
 STATE_ERROR = "error"
 
 # TRV příkazy
-TRV_ON = {"hvac_mode": "heat", "temperature": 30}
+TRV_ON = {"hvac_mode": "heat", "temperature": 35}
 TRV_OFF = {"hvac_mode": "off", "temperature": 5}
 
 # Výchozí hodnoty
