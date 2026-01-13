@@ -726,11 +726,17 @@ class RoomController:
         """Aplikovat učení z validního cyklu s kontinuálním učením."""
         # Přidat aktuální cyklus do performance_history pokud je validní
         if self._current_cycle.get("valid", False):
-            self._performance_history.append({
-                "heating_duration": self._current_cycle["heating_duration"],
-                "overshoot": self._current_cycle["overshoot"],
-                "timestamp": self._current_cycle["timestamp"],
-            })
+            # Validate that required keys exist
+            if all(key in self._current_cycle for key in ["heating_duration", "overshoot", "timestamp"]):
+                self._performance_history.append({
+                    "heating_duration": self._current_cycle["heating_duration"],
+                    "overshoot": self._current_cycle["overshoot"],
+                    "timestamp": self._current_cycle["timestamp"],
+                })
+            else:
+                _LOGGER.warning(
+                    f"TRV [{self._room_name}]: Current cycle missing required keys, skipping learning"
+                )
         
         # Spočítat validní cykly
         valid_cycles = [c for c in self._history if c.get("valid", False)]
@@ -752,8 +758,10 @@ class RoomController:
             )
             
             # Logovat změny pokud jsou významné
-            if self._avg_heating_duration is None:
-                # První naučení
+            is_first_learning = (self._avg_heating_duration is None)
+            
+            if is_first_learning:
+                # První naučení - systém dokončil počáteční učící fázi
                 _LOGGER.info(
                     f"TRV [{self._room_name}]: LEARNING COMPLETE! "
                     f"avg_duration={new_avg_duration:.0f}s, "
