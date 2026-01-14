@@ -1,5 +1,6 @@
 """Stavový automat pro řízení TRV v místnosti - ON/OFF režim s adaptivním učením."""
 import asyncio
+import json
 import logging
 import time
 import os
@@ -7,7 +8,7 @@ from collections import deque
 from typing import Any, Optional
 from datetime import datetime
 
-from homeassistant.util.json import load_json, save_json
+from homeassistant.util.json import load_json
 
 from .const import (
     STATE_IDLE,
@@ -278,11 +279,14 @@ class RoomController:
         # Zajistit existenci adresáře
         os.makedirs(os.path.dirname(storage_path), exist_ok=True)
         
-        # ✅ Async file I/O:
+        # ✅ Async file I/O - zápis pomocí standardního json.dump:
+        def _write_json():
+            """Zapsat JSON do souboru."""
+            with open(storage_path, 'w') as f:
+                json.dump(data, f, indent=2)
+        
         try:
-            await self._hass.async_add_executor_job(
-                save_json, storage_path, data
-            )
+            await self._hass.async_add_executor_job(_write_json)
             _LOGGER.debug(f"TRV [{self._room_name}]: Saved learned params")
         except Exception as e:
             _LOGGER.error(f"TRV [{self._room_name}]: Failed to save learned params: {e}")
