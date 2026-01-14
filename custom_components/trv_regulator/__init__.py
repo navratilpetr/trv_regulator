@@ -8,7 +8,6 @@ from homeassistant.helpers.event import async_track_state_change_event
 
 from .const import (
     DOMAIN,
-    DEFAULT_LEARNING_SPEED,
     DEFAULT_LEARNING_CYCLES,
     DEFAULT_DESIRED_OVERSHOOT,
     DEFAULT_MIN_HEATING_DURATION,
@@ -56,6 +55,31 @@ async def _wait_for_entities(hass, entry, max_wait=60):
     )
 
 
+async def async_migrate_entry(hass, config_entry: ConfigEntry) -> bool:
+    """Migrovat starou konfiguraci."""
+    if config_entry.version == 1:
+        new_data = {**config_entry.data}
+        new_options = {**config_entry.options}
+        
+        # Odstranit zastaralý parametr learning_speed
+        new_data.pop("learning_speed", None)
+        new_options.pop("learning_speed", None)
+        
+        hass.config_entries.async_update_entry(
+            config_entry,
+            data=new_data,
+            options=new_options,
+            version=2
+        )
+        
+        _LOGGER.info(
+            f"Migrace konfigurace z verze 1 na 2 "
+            f"(odstraněn nepoužívaný parametr learning_speed)"
+        )
+    
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Nastavení po přidání přes UI."""
     # Počkat až budou dostupné všechny entity
@@ -90,7 +114,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         window_entities=all_window_entities,
         hysteresis=get_config_value("hysteresis", 0.3),
         window_open_delay=get_config_value("window_open_delay", 120),
-        learning_speed=get_config_value("learning_speed", DEFAULT_LEARNING_SPEED),
         learning_cycles_required=get_config_value("learning_cycles_required", DEFAULT_LEARNING_CYCLES),
         desired_overshoot=get_config_value("desired_overshoot", DEFAULT_DESIRED_OVERSHOOT),
         min_heating_duration=get_config_value("min_heating_duration", DEFAULT_MIN_HEATING_DURATION),
