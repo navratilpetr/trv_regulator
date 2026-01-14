@@ -2,11 +2,12 @@
 import asyncio
 import logging
 import time
-import json
 import os
 from collections import deque
 from typing import Any, Optional
 from datetime import datetime
+
+from homeassistant.util.json import load_json, save_json
 
 from .const import (
     STATE_IDLE,
@@ -110,9 +111,6 @@ class RoomController:
         
         # Refresh callback (set by coordinator to avoid circular import)
         self._refresh_callback = None
-        
-        # Načíst naučené parametry
-        self._load_learned_params()
 
         _LOGGER.info(
             f"TRV [{self._room_name}] initialized (ON/OFF mode): "
@@ -183,6 +181,12 @@ class RoomController:
         """Set the callback for requesting refresh (avoids circular import)."""
         self._refresh_callback = callback
 
+    def reset_cycle_state(self):
+        """Reset any in-progress heating cycle (used after restart for safety)."""
+        self._heating_start_time = None
+        self._cooldown_start_time = None
+        self._current_cycle = {}
+
     def get_temperature(self) -> Optional[float]:
         """Načíst aktuální teplotu (public method)."""
         return self._get_temperature()
@@ -191,7 +195,7 @@ class RoomController:
         """Načíst cílovou teplotu (public method)."""
         return self._get_target()
 
-    def _load_learned_params(self):
+    async def _load_learned_params(self):
         """Načíst naučené parametry z úložiště."""
         storage_path = os.path.join(
             self._hass.config.path(STORAGE_DIR),
@@ -203,8 +207,10 @@ class RoomController:
             return
         
         try:
-            with open(storage_path, 'r') as f:
-                data = json.load(f)
+            # ✅ Async file I/O místo synchronního open():
+            data = await self._hass.async_add_executor_job(
+                load_json, storage_path
+            )
             
             room_data = data.get(self._room_name, {})
             if room_data:
@@ -239,7 +245,7 @@ class RoomController:
         except Exception as e:
             _LOGGER.error(f"TRV [{self._room_name}]: Failed to load learned params: {e}")
 
-    def _save_learned_params(self):
+    async def _save_learned_params(self):
         """Uložit naučené parametry do úložiště."""
         storage_path = os.path.join(
             self._hass.config.path(STORAGE_DIR),
@@ -250,8 +256,10 @@ class RoomController:
         data = {}
         if os.path.exists(storage_path):
             try:
-                with open(storage_path, 'r') as f:
-                    data = json.load(f)
+                # ✅ Async file I/O:
+                data = await self._hass.async_add_executor_job(
+                    load_json, storage_path
+                )
             except Exception as e:
                 _LOGGER.warning(f"TRV [{self._room_name}]: Failed to read existing storage: {e}")
         
@@ -263,17 +271,18 @@ class RoomController:
             "valid_cycles_count": self._valid_cycles_count,
             "last_learned": self._last_learned,
             "avg_overshoot": self._avg_overshoot,
-            "history": self._history[-HISTORY_SIZE:],  # Uložit max HISTORY_SIZE cyklů
-            "performance_history": list(self._performance_history),  # Uložit performance_history
+            "history": self._history[-HISTORY_SIZE:],
+            "performance_history": list(self._performance_history),
         }
         
         # Zajistit existenci adresáře
         os.makedirs(os.path.dirname(storage_path), exist_ok=True)
         
-        # Uložit
+        # ✅ Async file I/O:
         try:
-            with open(storage_path, 'w') as f:
-                json.dump(data, f, indent=2)
+            await self._hass.async_add_executor_job(
+                save_json, storage_path, data
+            )
             _LOGGER.debug(f"TRV [{self._room_name}]: Saved learned params")
         except Exception as e:
             _LOGGER.error(f"TRV [{self._room_name}]: Failed to save learned params: {e}")
@@ -676,7 +685,7 @@ class RoomController:
             await self._apply_learning()
         
         # Uložit parametry
-        self._save_learned_params()
+        await self._save_learned_params()
         
         # Reset proměnných
         self._heating_start_time = None

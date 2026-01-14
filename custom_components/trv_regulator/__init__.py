@@ -15,6 +15,7 @@ from .const import (
     DEFAULT_MAX_VALID_OVERSHOOT,
     DEFAULT_COOLDOWN_DURATION,
     TARGET_DEBOUNCE_DELAY,
+    TRV_OFF,
 )
 from .coordinator import TrvRegulatorCoordinator
 from .room_controller import RoomController
@@ -120,6 +121,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         max_heating_duration=get_config_value("max_heating_duration", DEFAULT_MAX_HEATING_DURATION),
         max_valid_overshoot=get_config_value("max_valid_overshoot", DEFAULT_MAX_VALID_OVERSHOOT),
         cooldown_duration=get_config_value("cooldown_duration", DEFAULT_COOLDOWN_DURATION),
+    )
+
+    # Načíst naučené parametry asynchronně
+    await room._load_learned_params()
+
+    # ✅ BEZPEČNOSTNÍ RESET PO RESTARTU
+    _LOGGER.info(
+        f"TRV [{room._room_name}]: "
+        "Post-restart safety: Resetting to safe state (all TRVs OFF)"
+    )
+    await room._set_all_trv(TRV_OFF)
+    
+    # Zrušit případný rozpracovaný cyklus
+    room.reset_cycle_state()
+    
+    _LOGGER.debug(
+        f"TRV [{room._room_name}]: "
+        "Post-restart: Cleared any in-progress heating cycle"
     )
 
     # Vytvoř coordinator
