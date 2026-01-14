@@ -181,6 +181,12 @@ class RoomController:
         """Set the callback for requesting refresh (avoids circular import)."""
         self._refresh_callback = callback
 
+    def reset_cycle_state(self):
+        """Reset any in-progress heating cycle (used after restart for safety)."""
+        self._heating_start_time = None
+        self._cooldown_start_time = None
+        self._current_cycle = {}
+
     def get_temperature(self) -> Optional[float]:
         """Načíst aktuální teplotu (public method)."""
         return self._get_temperature()

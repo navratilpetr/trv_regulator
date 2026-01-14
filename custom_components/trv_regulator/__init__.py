@@ -134,9 +134,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await room._set_all_trv(TRV_OFF)
     
     # Zrušit případný rozpracovaný cyklus
-    room._heating_start_time = None
-    room._cooldown_start_time = None
-    room._current_cycle = {}
+    room.reset_cycle_state()
     
     _LOGGER.debug(
         f"TRV [{room._room_name}]: "
