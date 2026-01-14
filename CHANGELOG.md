@@ -5,6 +5,35 @@ Všechny významné změny v projektu budou dokumentovány v tomto souboru.
 Formát vychází z [Keep a Changelog](https://keepachangelog.com/cs/1.0.0/),
 a projekt dodržuje [sémantické verzování](https://semver.org/lang/cs/).
 
+## [3.0.6] - 2026-01-14
+
+### Přidáno
+- ✅ **Post-restart safety check** - po restartu Home Assistant automaticky nastaví všechny TRV do bezpečného stavu (OFF)
+  - Vyčistí rozpracované topné cykly pro zajištění konzistence
+  - Chrání proti riziku přetopení v případě, že hlavice zůstaly zapnuté během restartu
+  - Loguje bezpečnostní akce pro lepší diagnostiku
+  - Přidána metoda `reset_cycle_state()` v `RoomController`
+- ✅ **Async file I/O** - všechny operace se soubory nyní probíhají asynchronně
+  - Odstraněny blocking calls v Home Assistant event loopu
+  - Použití `homeassistant.util.json.load_json` pro čtení
+  - Použití standardního `json.dump()` v async wrapperu pro zápis
+  - Metody `_load_learned_params()` a `_save_learned_params()` jsou nyní async
+  - Lepší výkon a dodržení Home Assistant best practices
+
+### Opraveno
+- 🐛 **Blocking I/O warnings** - vyřešeno varování "Detected blocking call to open() inside the event loop"
+  - Čtení: `await async_add_executor_job(load_json, path)`
+  - Zápis: `await async_add_executor_job(_write_json)`
+- 🐛 **Bezpečnostní riziko po restartu** - opravena situace kdy TRV hlavice mohly zůstat v režimu topení (35°C) po restartu HA, zatímco systém byl v IDLE stavu
+- 🐛 **Import error** - opraven pokus o import neexistující funkce `save_json` z `homeassistant.util.json`
+- 🐛 **Konzistence stavu** - zajištěno že po restartu je stav TRV hlavic konzistentní se stavem regulátoru
+
+### Technické změny
+- Import změněn z `from homeassistant.util.json import load_json, save_json` na `import json` + `from homeassistant.util.json import load_json`
+- Volání `_load_learned_params()` v `async_setup_entry` nyní s `await`
+- Volání `_save_learned_params()` v `_finish_cooldown()` nyní s `await`
+- Bezpečnostní reset TRV do OFF stavu ihned po startu integrace
+
 ## [3.0.2] - 2026-01-13
 
 ### Opraveno
