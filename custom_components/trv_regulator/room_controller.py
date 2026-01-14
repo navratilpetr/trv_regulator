@@ -503,21 +503,23 @@ class RoomController:
                         return STATE_COOLDOWN
                 else:
                     # LEARNED: vypnout podle času NEBO při dosažení targetu
-                    planned_duration = self._avg_heating_duration - self._time_offset
-                    
-                    if elapsed >= planned_duration:
-                        _LOGGER.info(
-                            f"TRV [{self._room_name}]: Predictive shutdown "
-                            f"(elapsed={elapsed:.0f}s >= planned={planned_duration:.0f}s)"
-                        )
-                        return STATE_COOLDOWN
+                    # Bezpečnostní kontrola: pokud nemáme naučené parametry, fallback na čekání na target
+                    if self._avg_heating_duration is not None:
+                        planned_duration = self._avg_heating_duration - self._time_offset
+                        
+                        if elapsed >= planned_duration:
+                            _LOGGER.info(
+                                f"TRV [{self._room_name}]: Predictive shutdown "
+                                f"(elapsed={elapsed:.0f}s >= planned={planned_duration:.0f}s)"
+                            )
+                            return STATE_COOLDOWN
                     
                     # Bezpečnostní vypnutí když dosáhne targetu dříve
-                    elif temp >= target:
+                    if temp >= target:
                         _LOGGER.info(
                             f"TRV [{self._room_name}]: Target reached early in LEARNED mode "
                             f"(temp={temp:.1f}°C >= target={target:.1f}°C) "
-                            f"after {elapsed:.0f}s (planned: {planned_duration:.0f}s)"
+                            f"after {elapsed:.0f}s"
                         )
                         return STATE_COOLDOWN
             
