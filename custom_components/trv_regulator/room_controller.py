@@ -4,6 +4,7 @@ import logging
 import time
 import json
 import os
+from collections import deque
 from typing import Any, Optional
 from datetime import datetime
 
@@ -38,6 +39,8 @@ CONSERVATIVE_ADJUSTMENT_FACTOR = 0.2  # 20% of error
 AGGRESSIVE_LARGE_ERROR_THRESHOLD = 0.5  # °C
 AGGRESSIVE_LARGE_ADJUSTMENT = 120  # seconds (2 min)
 AGGRESSIVE_SMALL_ADJUSTMENT = 60  # seconds (1 min)
+SIGNIFICANT_DURATION_CHANGE = 10  # seconds - log when avg_duration changes by this much
+SIGNIFICANT_OFFSET_CHANGE = 5  # seconds - log when time_offset changes by this much
 
 
 class RoomController:
@@ -100,6 +103,9 @@ class RoomController:
         
         # Historie cyklů
         self._history = []
+        
+        # Performance history pro kontinuální učení (klouzavý průměr)
+        self._performance_history = deque(maxlen=self._learning_cycles_required)
         
         # Error handling
         self._sensor_unavailable_since = None
@@ -218,6 +224,19 @@ class RoomController:
                 self._avg_overshoot = room_data.get("avg_overshoot")
                 self._history = room_data.get("history", [])[-HISTORY_SIZE:]
                 
+                # Načíst performance_history
+                performance_data = room_data.get("performance_history", [])
+                if len(performance_data) > self._learning_cycles_required:
+                    _LOGGER.warning(
+                        f"TRV [{self._room_name}]: Performance history truncated from "
+                        f"{len(performance_data)} to {self._learning_cycles_required} cycles "
+                        "(learning_cycles_required changed)"
+                    )
+                self._performance_history = deque(
+                    performance_data,
+                    maxlen=self._learning_cycles_required
+                )
+                
                 _LOGGER.info(
                     f"TRV [{self._room_name}]: Loaded learned params: "
                     f"avg_duration={self._avg_heating_duration}s, "
@@ -253,6 +272,7 @@ class RoomController:
             "last_learned": self._last_learned,
             "avg_overshoot": self._avg_overshoot,
             "history": self._history[-HISTORY_SIZE:],  # Uložit max HISTORY_SIZE cyklů
+            "performance_history": list(self._performance_history),  # Uložit performance_history
         }
         
         # Zajistit existenci adresáře
@@ -505,23 +525,29 @@ class RoomController:
         return self._evaluate_heating(temp, target)
 
     def _evaluate_heating(self, temp: float, target: float) -> str:
-        """Vyhodnotit zda zapnout/vypnout topení."""
+        """Vyhodnotit zda zapnout/vypnout topení s asymetrickou hysterezí."""
         lower_threshold = target - self._hysteresis
         
-        if temp <= lower_threshold:
-            if self._state != STATE_HEATING:
+        if self._state == STATE_HEATING:
+            # Pokud topíme: vypnout HNED při dosažení cílové teploty
+            if temp >= target:
+                _LOGGER.debug(
+                    f"TRV [{self._room_name}]: Temp {temp:.1f}°C "
+                    f">= target {target:.1f}°C → IDLE"
+                )
+                return STATE_IDLE
+            else:
+                return STATE_HEATING
+        else:
+            # Pokud netopíme: zapnout až při poklesu pod lower_threshold
+            if temp <= lower_threshold:
                 _LOGGER.debug(
                     f"TRV [{self._room_name}]: Temp {temp:.1f}°C "
                     f"<= {lower_threshold:.1f}°C → HEATING"
                 )
-            return STATE_HEATING
-        else:
-            if self._state != STATE_IDLE:
-                _LOGGER.debug(
-                    f"TRV [{self._room_name}]: Temp {temp:.1f}°C "
-                    f"> {lower_threshold:.1f}°C → IDLE"
-                )
-            return STATE_IDLE
+                return STATE_HEATING
+            else:
+                return STATE_IDLE
 
     async def _transition_to(self, new_state: str, temp: Optional[float], target: Optional[float]):
         """Provést přechod do nového stavu."""
@@ -697,44 +723,77 @@ class RoomController:
         return True
 
     async def _apply_learning(self):
-        """Aplikovat učení z validního cyklu."""
+        """Aplikovat učení z validního cyklu s kontinuálním učením."""
+        # Přidat aktuální cyklus do performance_history pokud je validní
+        if self._current_cycle.get("valid", False):
+            # Validate that required keys exist
+            if all(key in self._current_cycle for key in ["heating_duration", "overshoot", "timestamp"]):
+                self._performance_history.append({
+                    "heating_duration": self._current_cycle["heating_duration"],
+                    "overshoot": self._current_cycle["overshoot"],
+                    "timestamp": self._current_cycle["timestamp"],
+                })
+            else:
+                _LOGGER.warning(
+                    f"TRV [{self._room_name}]: Current cycle missing required keys, skipping learning"
+                )
+        
         # Spočítat validní cykly
         valid_cycles = [c for c in self._history if c.get("valid", False)]
         self._valid_cycles_count = len(valid_cycles)
         
-        if self._is_learning:
-            # Stále učíme
-            if self._valid_cycles_count >= self._learning_cycles_required:
-                # Máme dost cyklů, vypočítat parametry
-                durations = [c["heating_duration"] for c in valid_cycles]
-                overshoots = [c["overshoot"] for c in valid_cycles]
-                
-                self._avg_heating_duration = sum(durations) / len(durations)
-                self._avg_overshoot = sum(overshoots) / len(overshoots)
-                
-                # Vypočítat time_offset
-                self._time_offset = self._calculate_time_offset(
-                    self._avg_heating_duration,
-                    self._avg_overshoot
-                )
-                
-                self._is_learning = False
-                self._last_learned = datetime.now().isoformat()
-                
+        # Pokud máme alespoň learning_cycles_required cyklů v performance_history
+        if len(self._performance_history) >= self._learning_cycles_required:
+            # PŘEPOČÍTAT z posledních N cyklů (klouzavý průměr)
+            durations = [c["heating_duration"] for c in self._performance_history]
+            overshoots = [c["overshoot"] for c in self._performance_history]
+            
+            new_avg_duration = sum(durations) / len(durations)
+            new_avg_overshoot = sum(overshoots) / len(overshoots)
+            
+            # Vypočítat nový time_offset
+            new_time_offset = self._calculate_time_offset(
+                new_avg_duration,
+                new_avg_overshoot
+            )
+            
+            # Logovat změny pokud jsou významné
+            is_first_learning = (self._avg_heating_duration is None)
+            
+            if is_first_learning:
+                # První naučení - systém dokončil počáteční učící fázi
                 _LOGGER.info(
                     f"TRV [{self._room_name}]: LEARNING COMPLETE! "
-                    f"avg_duration={self._avg_heating_duration:.0f}s, "
-                    f"avg_overshoot={self._avg_overshoot:.2f}°C, "
-                    f"time_offset={self._time_offset:.0f}s"
+                    f"avg_duration={new_avg_duration:.0f}s, "
+                    f"avg_overshoot={new_avg_overshoot:.2f}°C, "
+                    f"time_offset={new_time_offset:.0f}s "
+                    f"(z posledních {len(self._performance_history)} cyklů)"
                 )
-        else:
-            # Už jsme naučení, adaptivně upravit time_offset
-            if valid_cycles:
-                last_cycle = valid_cycles[-1]
-                actual_overshoot = last_cycle["overshoot"]
+                self._is_learning = False
+            else:
+                # Kontinuální úprava - logovat jen pokud je změna > SIGNIFICANT_*_CHANGE
+                duration_change = abs(new_avg_duration - self._avg_heating_duration)
+                offset_change = abs(new_time_offset - self._time_offset)
                 
-                # Upravit time_offset
-                self._adjust_time_offset(actual_overshoot)
+                if duration_change > SIGNIFICANT_DURATION_CHANGE or offset_change > SIGNIFICANT_OFFSET_CHANGE:
+                    _LOGGER.info(
+                        f"TRV [{self._room_name}]: Parameters updated: "
+                        f"avg_duration {self._avg_heating_duration:.0f}s → {new_avg_duration:.0f}s, "
+                        f"time_offset {self._time_offset:.0f}s → {new_time_offset:.0f}s "
+                        f"(klouzavý průměr z {len(self._performance_history)} cyklů)"
+                    )
+            
+            # Aplikovat nové hodnoty
+            self._avg_heating_duration = new_avg_duration
+            self._avg_overshoot = new_avg_overshoot
+            self._time_offset = new_time_offset
+            self._last_learned = datetime.now().isoformat()
+        elif self._is_learning and self._avg_heating_duration is None:
+            # Stále učíme a nemáme ještě dost cyklů - neděláme nic
+            _LOGGER.debug(
+                f"TRV [{self._room_name}]: Learning in progress "
+                f"({len(self._performance_history)}/{self._learning_cycles_required} cycles)"
+            )
 
     def _calculate_time_offset(self, avg_duration: float, avg_overshoot: float) -> float:
         """Vypočítat počáteční time_offset."""
