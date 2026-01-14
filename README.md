@@ -53,8 +53,9 @@ Custom integrace pro Home Assistant - **ON/OFF řízení s adaptivním učením*
 - **Zpoždění větrání** - čas do aktivace větrání (30-600s, výchozí: 120s)
 
 ### Parametry učení:
-- **Rychlost učení** - conservative (postupné) / aggressive (rychlé), výchozí: conservative
-- **Počet cyklů** - kolik cyklů potřebuje k naučení (5-30, výchozí: 10)
+- **Počet cyklů pro učení** - velikost klouzavého průměru (5-30, výchozí: 10)
+  - Menší číslo (5) = rychlejší adaptace na změny
+  - Větší číslo (20) = pomalejší adaptace, stabilnější
 - **Požadovaný překmit** - cílový překmit v °C (0.0-0.5°C, výchozí: 0.1°C)
 - **Min. doba topení** - minimální validní doba topení (60-600s, výchozí: 180s / 3 min)
 - **Max. doba topení** - maximální validní doba topení (900-10800s, výchozí: 7200s / 120 min)
@@ -81,22 +82,18 @@ Integrace používá **dvoustupňové ON/OFF řízení** s časovým prediktivn�
    - time_offset (kolik sekund dřív vypnout)
 ```
 
-#### Fáze 2: LEARNED (po naučení)
+#### Fáze 2: LEARNED (kontinuální učení s klouzavým průměrem)
 
 ```
 1. Zapne TRV na 35°C
-2. Vypne po čase: avg_heating_duration - time_offset
-   (NEčeká na dosažení targetu!)
+2. Vypne když:
+   - Uplyne plánovaný čas: avg_heating_duration - time_offset
+   - NEBO dosáhne cílové teploty (bezpečnostní pojistka)
 3. Měří skutečný překmit
-4. Adaptivně upravuje time_offset:
-   
-   Conservative režim (bezpečný):
-   - Úprava o 20% rozdílu od cíle
-   - Postupná konvergence
-   
-   Aggressive režim (rychlý):
-   - Velký překmit (>0.5°C) → úprava +2 min
-   - Malý překmit → úprava +1 min
+4. Po každém validním cyklu přepočítá parametry z posledních N cyklů:
+   - Přidá nový cyklus, odstraní nejstarší
+   - Přepočítá avg_heating_duration a time_offset z klouzavého průměru
+   - Automatická adaptace na změny počasí
 ```
 
 ### Příklad
@@ -124,11 +121,14 @@ Zapne TRV, topí 1440s - 45s = 1395s (23:15 min)
 Vypne PŘED dosažením targetu
 Měří překmit: 0.12°C ✓ blízko cíli (0.1°C)
 
-Další cyklus:
-Překmit 0.3°C → moc vysoký!
-Conservative úprava: +0.2 × 0.2 × 300 = +12s
-time_offset = 45s + 12s = 57s
-→ Příště vypne o 57s dřív
+Cyklus 12 (po naučení):
+Překmit 0.3°C
+
+Klouzavý průměr z posledních 10 cyklů:
+- Odstraní cyklus 1, přidá cyklus 12
+- Nový avg_overshoot = 0.27°C
+- Přepočítá time_offset = (0.27 - 0.1) × 300 = 51s
+→ Příště vypne o 51s dřív (postupná adaptace)
 ```
 
 ## 📊 Stavový automat
@@ -183,7 +183,6 @@ attributes:
   avg_heating_duration: 1500  # sekund
   time_offset: 180  # sekund
   avg_overshoot: 0.15  # °C
-  learning_speed: "conservative"
 ```
 
 ### 3. `sensor.trv_regulator_{room}_last_cycle`
@@ -395,12 +394,15 @@ Nastavení → Systém → Protokoly → Hledat "TRV"
 4. Zavři okno
 5. Sleduj log → okamžitě vyhodnotí teplotu
 
-### Test 5: Adaptivní učení
+### Test 5: Kontinuální učení (klouzavý průměr)
 1. V learned režimu sleduj `last_cycle` sensor
 2. Zkontroluj `overshoot` každého cyklu
 3. Sleduj jak se `time_offset` upravuje v `learning` sensoru
-4. Conservative režim → postupné změny
-5. Aggressive režim → rychlé změny
+4. Parametry se postupně adaptují podle klouzavého průměru
+5. Rychlost změn závisí na `learning_cycles_required`:
+   - 5 cyklů = rychlé změny (20% vliv nového cyklu)
+   - 10 cyklů = střední rychlost (10% vliv)
+   - 20 cyklů = pomalé změny (5% vliv)
 
 ## 🐛 Řešení problémů
 
@@ -421,9 +423,10 @@ Nastavení → Systém → Protokoly → Hledat "TRV"
 
 ### Velký překmit
 - V learning režimu normální (až ±1°C)
-- V learned režimu zkontroluj `learning_speed`
-- Conservative režim → pomalejší adaptace
-- Aggressive režim → rychlejší korekce
+- V learned režimu se automaticky adaptuje pomocí klouzavého průměru
+- Pokud přetrvává:
+  - Zkus snížit `learning_cycles_required` na 5 (rychlejší adaptace)
+  - Nebo zvýš `desired_overshoot` na 0.2°C (tolerantnější)
 
 ## 🔄 Verzování
 

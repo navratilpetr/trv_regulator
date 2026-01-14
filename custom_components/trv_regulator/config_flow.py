@@ -7,7 +7,6 @@ from .const import (
     DOMAIN,
     DEFAULT_HYSTERESIS,
     DEFAULT_WINDOW_OPEN_DELAY,
-    DEFAULT_LEARNING_SPEED,
     DEFAULT_LEARNING_CYCLES,
     DEFAULT_DESIRED_OVERSHOOT,
     DEFAULT_MIN_HEATING_DURATION,
@@ -20,7 +19,7 @@ from .const import (
 class TrvRegulatorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Config flow pro TRV Regulator."""
 
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self):
         """Inicializace config flow."""
@@ -91,14 +90,6 @@ class TrvRegulatorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         vol.Coerce(int), vol.Range(min=30, max=600)
                     ),
                     vol.Optional(
-                        "learning_speed", default=DEFAULT_LEARNING_SPEED
-                    ): selector.SelectSelector(
-                        selector.SelectSelectorConfig(
-                            options=["conservative", "aggressive"],
-                            mode=selector.SelectSelectorMode.DROPDOWN,
-                        )
-                    ),
-                    vol.Optional(
                         "learning_cycles_required", default=DEFAULT_LEARNING_CYCLES
                     ): vol.All(vol.Coerce(int), vol.Range(min=5, max=30)),
                     vol.Optional(
@@ -159,15 +150,6 @@ class TrvRegulatorOptionsFlow(config_entries.OptionsFlow):
                         "window_open_delay",
                         default=current_options.get("window_open_delay", current_data.get("window_open_delay", DEFAULT_WINDOW_OPEN_DELAY))
                     ): vol.All(vol.Coerce(int), vol.Range(min=30, max=600)),
-                    vol.Optional(
-                        "learning_speed",
-                        default=current_options.get("learning_speed", current_data.get("learning_speed", DEFAULT_LEARNING_SPEED))
-                    ): selector.SelectSelector(
-                        selector.SelectSelectorConfig(
-                            options=["conservative", "aggressive"],
-                            mode=selector.SelectSelectorMode.DROPDOWN,
-                        )
-                    ),
                     vol.Optional(
                         "learning_cycles_required",
                         default=current_options.get("learning_cycles_required", current_data.get("learning_cycles_required", DEFAULT_LEARNING_CYCLES))

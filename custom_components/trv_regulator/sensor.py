@@ -108,7 +108,6 @@ class TrvLearningSensor(TrvBaseSensor):
         attrs = {
             "valid_cycles": room.valid_cycles_count,
             "required_cycles": room._learning_cycles_required,
-            "learning_speed": room._learning_speed,
         }
         
         if room.avg_heating_duration is not None:

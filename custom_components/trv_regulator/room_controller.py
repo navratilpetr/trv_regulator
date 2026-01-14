@@ -16,7 +16,6 @@ from .const import (
     STATE_ERROR,
     TRV_ON,
     TRV_OFF,
-    DEFAULT_LEARNING_SPEED,
     DEFAULT_LEARNING_CYCLES,
     DEFAULT_DESIRED_OVERSHOOT,
     DEFAULT_MIN_HEATING_DURATION,
@@ -35,10 +34,6 @@ _LOGGER = logging.getLogger(__name__)
 
 # Learning algorithm constants
 SECONDS_PER_DEGREE_OVERSHOOT = 300  # Estimate: 300s heating ≈ 1°C overshoot
-CONSERVATIVE_ADJUSTMENT_FACTOR = 0.2  # 20% of error
-AGGRESSIVE_LARGE_ERROR_THRESHOLD = 0.5  # °C
-AGGRESSIVE_LARGE_ADJUSTMENT = 120  # seconds (2 min)
-AGGRESSIVE_SMALL_ADJUSTMENT = 60  # seconds (1 min)
 SIGNIFICANT_DURATION_CHANGE = 10  # seconds - log when avg_duration changes by this much
 SIGNIFICANT_OFFSET_CHANGE = 5  # seconds - log when time_offset changes by this much
 
@@ -56,7 +51,6 @@ class RoomController:
         window_entities: list[str],
         hysteresis: float,
         window_open_delay: int,
-        learning_speed: str = DEFAULT_LEARNING_SPEED,
         learning_cycles_required: int = DEFAULT_LEARNING_CYCLES,
         desired_overshoot: float = DEFAULT_DESIRED_OVERSHOOT,
         min_heating_duration: int = DEFAULT_MIN_HEATING_DURATION,
@@ -73,7 +67,6 @@ class RoomController:
         self._window_entities = window_entities
         self._hysteresis = hysteresis
         self._window_open_delay = window_open_delay
-        self._learning_speed = learning_speed
         self._learning_cycles_required = learning_cycles_required
         self._desired_overshoot = desired_overshoot
         self._min_heating_duration = min_heating_duration
@@ -125,7 +118,6 @@ class RoomController:
             f"TRV [{self._room_name}] initialized (ON/OFF mode): "
             f"hysteresis={self._hysteresis}°C, "
             f"window_open_delay={self._window_open_delay}s, "
-            f"learning_speed={self._learning_speed}, "
             f"learning_cycles_required={self._learning_cycles_required}"
         )
 
@@ -510,12 +502,24 @@ class RoomController:
                         )
                         return STATE_COOLDOWN
                 else:
-                    # LEARNED: vypnout podle času
-                    planned_duration = self._avg_heating_duration - self._time_offset
-                    if elapsed >= planned_duration:
+                    # LEARNED: vypnout podle času NEBO při dosažení targetu
+                    # Bezpečnostní kontrola: pokud nemáme naučené parametry, fallback na čekání na target
+                    if self._avg_heating_duration is not None:
+                        planned_duration = self._avg_heating_duration - self._time_offset
+                        
+                        if elapsed >= planned_duration:
+                            _LOGGER.info(
+                                f"TRV [{self._room_name}]: Predictive shutdown "
+                                f"(elapsed={elapsed:.0f}s >= planned={planned_duration:.0f}s)"
+                            )
+                            return STATE_COOLDOWN
+                    
+                    # Bezpečnostní vypnutí když dosáhne targetu dříve
+                    if temp >= target:
                         _LOGGER.info(
-                            f"TRV [{self._room_name}]: Predictive shutdown "
-                            f"(elapsed={elapsed:.0f}s >= planned={planned_duration:.0f}s)"
+                            f"TRV [{self._room_name}]: Target reached early in LEARNED mode "
+                            f"(temp={temp:.1f}°C >= target={target:.1f}°C) "
+                            f"after {elapsed:.0f}s"
                         )
                         return STATE_COOLDOWN
             
@@ -808,34 +812,6 @@ class RoomController:
         time_offset = max(-max_offset, min(max_offset, time_offset))
         
         return time_offset
-
-    def _adjust_time_offset(self, actual_overshoot: float):
-        """Adaptivně upravit time_offset podle skutečného překmitu."""
-        overshoot_error = actual_overshoot - self._desired_overshoot
-        
-        if self._learning_speed == "conservative":
-            # Postupná korekce s faktorem CONSERVATIVE_ADJUSTMENT_FACTOR
-            adjustment = overshoot_error * CONSERVATIVE_ADJUSTMENT_FACTOR * SECONDS_PER_DEGREE_OVERSHOOT
-        else:  # aggressive
-            # Rychlá korekce
-            if abs(overshoot_error) > AGGRESSIVE_LARGE_ERROR_THRESHOLD:
-                adjustment = overshoot_error * AGGRESSIVE_LARGE_ADJUSTMENT
-            else:
-                adjustment = overshoot_error * AGGRESSIVE_SMALL_ADJUSTMENT
-        
-        old_offset = self._time_offset
-        self._time_offset += adjustment
-        
-        # Limit: rozumné hodnoty
-        if self._avg_heating_duration:
-            max_offset = self._avg_heating_duration * 0.5
-            self._time_offset = max(-max_offset, min(max_offset, self._time_offset))
-        
-        _LOGGER.info(
-            f"TRV [{self._room_name}]: Adjusted time_offset: "
-            f"{old_offset:.0f}s → {self._time_offset:.0f}s "
-            f"(overshoot_error={overshoot_error:.2f}°C, mode={self._learning_speed})"
-        )
 
     async def _set_all_trv(self, command: dict[str, Any]):
         """Nastavit všechny TRV hlavice."""
