@@ -280,13 +280,13 @@ class RoomController:
         os.makedirs(os.path.dirname(storage_path), exist_ok=True)
         
         # ✅ Async file I/O - zápis pomocí standardního json.dump:
-        def _write_json():
+        def _write_json(path, json_data):
             """Zapsat JSON do souboru."""
-            with open(storage_path, 'w') as f:
-                json.dump(data, f, indent=2)
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(json_data, f, indent=2)
         
         try:
-            await self._hass.async_add_executor_job(_write_json)
+            await self._hass.async_add_executor_job(_write_json, storage_path, data)
             _LOGGER.debug(f"TRV [{self._room_name}]: Saved learned params")
         except Exception as e:
             _LOGGER.error(f"TRV [{self._room_name}]: Failed to save learned params: {e}")
