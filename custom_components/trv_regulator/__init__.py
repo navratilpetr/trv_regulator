@@ -1,10 +1,12 @@
 """TRV Regulator integration."""
 import asyncio
 import logging
+import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_track_state_change_event
+import homeassistant.helpers.config_validation as cv
 
 from .const import (
     DOMAIN,
@@ -87,10 +89,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await _wait_for_entities(hass, entry)
     
     # Vytvoř RoomController z config entry
-    trv_entities = [
-        {"entity": entity_id, "enabled": True}
-        for entity_id in entry.data["trv_entities"]
-    ]
+    trv_entities_data = entry.data.get("trv_entities", [])
+    
+    # Normalize trv_entities - může být list[str] nebo list[dict]
+    trv_entities = []
+    for trv in trv_entities_data:
+        if isinstance(trv, dict):
+            # Již ve formátu dict
+            trv_entities.append(trv)
+        else:
+            # String formát - konvertovat na dict
+            trv_entities.append({"entity": trv, "enabled": True})
 
     # Merge window_entities and door_entities (for backward compatibility)
     # Prefer options if exists, otherwise use data
@@ -149,10 +158,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Track změny relevantních entit
     # Target entity má debounce přímo v room_controller
+    # Extrahovat entity IDs z trv_entities (může být list[str] nebo list[dict])
+    trv_entity_ids = []
+    for trv in trv_entities_data:
+        if isinstance(trv, dict):
+            trv_entity_ids.append(trv["entity"])
+        else:
+            trv_entity_ids.append(trv)
+    
     tracked_entities = [
         entry.data["temperature_entity"],
         entry.data["target_entity"],
-        *entry.data["trv_entities"],
+        *trv_entity_ids,
         *all_window_entities,
     ]
 
@@ -172,6 +189,55 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Forward setup pro sensor platform
     await hass.config_entries.async_forward_entry_setups(entry, ["sensor"])
+
+    # Registrovat service pro reset naučených parametrů
+    async def handle_reset_learned_params(call):
+        """Handle reset learned parameters service."""
+        entity_id = call.data.get("entity_id")
+        room_name = call.data.get("room")
+        
+        # Najít správnou místnost
+        if entity_id:
+            # Extrahovat room_name z entity_id
+            # Formát: climate.trv_regulator_{room_name}
+            room_name = entity_id.split(".")[-1].replace("trv_regulator_", "")
+        
+        if not room_name:
+            _LOGGER.error("reset_learned_params: room or entity_id required")
+            return
+        
+        # Najít room_controller
+        domain_data = hass.data.get(DOMAIN, {})
+        room = None
+        
+        for key, value in domain_data.items():
+            try:
+                # Coordinator má atribut _room, který je RoomController
+                if hasattr(value, "_room") and value._room._room_name == room_name:
+                    room = value._room
+                    break
+            except (AttributeError, TypeError):
+                # Skip entries that don't match expected structure
+                continue
+        
+        if not room:
+            _LOGGER.error(f"reset_learned_params: room '{room_name}' not found")
+            return
+        
+        # Resetovat parametry
+        await room.reset_learned_params()
+        
+        _LOGGER.info(f"TRV [{room_name}]: Learned parameters manually reset via service")
+    
+    hass.services.async_register(
+        DOMAIN,
+        "reset_learned_params",
+        handle_reset_learned_params,
+        schema=vol.Schema({
+            vol.Optional("entity_id"): cv.entity_id,
+            vol.Optional("room"): cv.string,
+        })
+    )
 
     return True
 

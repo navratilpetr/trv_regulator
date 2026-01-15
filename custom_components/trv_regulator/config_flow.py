@@ -2,6 +2,7 @@
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.helpers import selector
+import homeassistant.helpers.config_validation as cv
 
 from .const import (
     DOMAIN,
@@ -122,10 +123,78 @@ class TrvRegulatorOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_init(self, user_input=None):
         """Zobrazit formulář pro úpravu parametrů."""
+        errors = {}
+        
         if user_input is not None:
-            # Uložit do options (správný způsob)
-            return self.async_create_entry(title="", data=user_input)
-
+            # Zpracovat změny TRV enabled/disabled
+            trv_entities = self.config_entry.data.get("trv_entities", [])
+            enabled_trv_ids = user_input.get("enabled_trv_entities", [])
+            
+            # Validace - minimálně jedna TRV musí být aktivní
+            if not enabled_trv_ids:
+                errors["base"] = "at_least_one_trv_required"
+            else:
+                # Rekonstruovat trv_entities s novým enabled stavem
+                # Zachovat formát - pokud jsou již ve formátu dict, použít to, jinak vytvořit dict
+                new_trv_entities = []
+                for trv in trv_entities:
+                    # Zjistit entity_id - může být string nebo dict
+                    if isinstance(trv, dict):
+                        entity_id = trv["entity"]
+                    else:
+                        entity_id = trv
+                    
+                    new_trv_entities.append({
+                        "entity": entity_id,
+                        "enabled": entity_id in enabled_trv_ids
+                    })
+                
+                # Aktualizovat config entry s novými daty
+                new_data = {**self.config_entry.data, "trv_entities": new_trv_entities}
+                
+                # Uložit options (bez trv_entities, to je v data)
+                new_options = {k: v for k, v in user_input.items() if k != "enabled_trv_entities"}
+                
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry,
+                    data=new_data,
+                    options=new_options
+                )
+                
+                # Reload entry pro aplikaci změn
+                await self.hass.config_entries.async_reload(self.config_entry.entry_id)
+                
+                return self.async_create_entry(title="", data={})
+        
+        # Načíst aktuální TRV
+        trv_entities = self.config_entry.data.get("trv_entities", [])
+        
+        # Vytvořit seznam všech TRV ID a aktuálně aktivních
+        all_trv_ids = []
+        enabled_trv_ids = []
+        
+        for trv in trv_entities:
+            # Zjistit entity_id a enabled stav
+            if isinstance(trv, dict):
+                entity_id = trv["entity"]
+                is_enabled = trv.get("enabled", True)
+            else:
+                entity_id = trv
+                is_enabled = True
+            
+            all_trv_ids.append(entity_id)
+            if is_enabled:
+                enabled_trv_ids.append(entity_id)
+        
+        # Získat friendly names pro TRV
+        trv_options = {}
+        for trv_id in all_trv_ids:
+            state = self.hass.states.get(trv_id)
+            if state:
+                trv_options[trv_id] = state.attributes.get("friendly_name", trv_id)
+            else:
+                trv_options[trv_id] = trv_id
+        
         # Načíst aktuální hodnoty z options nebo fallback na data
         current_options = self.config_entry.options
         current_data = self.config_entry.data
@@ -134,6 +203,11 @@ class TrvRegulatorOptionsFlow(config_entries.OptionsFlow):
             step_id="init",
             data_schema=vol.Schema(
                 {
+                    vol.Optional(
+                        "enabled_trv_entities",
+                        default=enabled_trv_ids,
+                        description={"suggested_value": enabled_trv_ids}
+                    ): cv.multi_select(trv_options),
                     vol.Optional(
                         "window_entities",
                         default=current_options.get("window_entities", current_data.get("window_entities", []))
@@ -176,4 +250,5 @@ class TrvRegulatorOptionsFlow(config_entries.OptionsFlow):
                     ): vol.All(vol.Coerce(int), vol.Range(min=600, max=1800)),
                 }
             ),
+            errors=errors,
         )

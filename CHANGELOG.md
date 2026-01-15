@@ -5,6 +5,46 @@ Všechny významné změny v projektu budou dokumentovány v tomto souboru.
 Formát vychází z [Keep a Changelog](https://keepachangelog.com/cs/1.0.0/),
 a projekt dodržuje [sémantické verzování](https://semver.org/lang/cs/).
 
+## [3.0.9] - 2026-01-15
+
+### Změněno
+- ⚙️ **TRV_OFF režim změněn z "off" na "heat"**
+  - Režim změněn z `{"hvac_mode": "off", "temperature": 5}` na `{"hvac_mode": "heat", "temperature": 5}`
+  - Lepší kompatibilita s TRV hlavicemi které nepodporují režim "off" (např. některé Zigbee termostatické hlavice)
+  - Funkčně ekvivalentní - teplota 5°C vypne topení
+
+### Přidáno
+- ✅ **POST-VENT režim** - inteligentní dotopení po větrání
+  - Po zavření okna první topný cyklus ignoruje naučený čas
+  - Topí až do dosažení cílové teploty (stejně jako v LEARNING režimu)
+  - Řeší problém nedotopení po větším poklesu teploty během větrání
+  - V historii označeno atributem `"post_vent": true`
+  - POST-VENT cykly nejsou použity pro učení (jsou považovány za nevalidní)
+  - Bezpečnostní limit `max_heating_duration` stále platí
+
+- 🎛️ **Options Flow - výběr aktivních TRV hlavic**
+  - Možnost zapnout/vypnout jednotlivé TRV hlavice přes UI
+  - Multi-select v nastavení integrace (Nastavení → Integrace → TRV Regulator → Možnosti)
+  - Backend logika již existovala, nyní přidáno UI
+  - Minimálně jedna TRV hlavice musí zůstat aktivní
+
+- 🔧 **Service pro reset naučených parametrů**
+  - Nová service `trv_regulator.reset_learned_params`
+  - Umožňuje manuálně smazat naučené parametry a začít učení znovu
+  - Užitečné po výměně radiátoru nebo TRV hlavice
+  - Podporuje `entity_id` nebo `room` parametr
+  - Použití: `service: trv_regulator.reset_learned_params` s `entity_id: climate.trv_regulator_loznice`
+
+### Technické detaily
+- Přidán flag `_post_vent_mode` v RoomController
+- Automatická detekce přechodu z VENT → HEATING stavu
+- POST-VENT cykly jsou automaticky invalidovány v `_is_cycle_valid()`
+- Service registrována v `async_setup_entry()`
+- Nová metoda `reset_learned_params()` v RoomController
+- Multi-select v Options Flow s validací minimálního počtu aktivních TRV
+- Podpora pro dict formát TRV entities s `enabled` flagem
+- Vytvořen soubor `services.yaml` s definicí služby
+
 ## [3.0.6] - 2026-01-14
 
 ### Přidáno
