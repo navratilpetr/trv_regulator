@@ -5,7 +5,7 @@ Všechny významné změny v projektu budou dokumentovány v tomto souboru.
 Formát vychází z [Keep a Changelog](https://keepachangelog.com/cs/1.0.0/),
 a projekt dodržuje [sémantické verzování](https://semver.org/lang/cs/).
 
-## [3.0.10] - 2026-01-15
+## [3.0.11] - 2026-01-15
 
 ### Přidáno
 - 📊 **Statistické senzory**
