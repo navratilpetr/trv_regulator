@@ -8,9 +8,8 @@ Bezpečnost TRV Regulator bereme vážně. Pokud jste objevili bezpečnostní zr
 
 **Nehlaste bezpečnostní zranitelnosti prostřednictvím veřejných GitHub issues.**
 
-Místo toho:
-1. Pošlete email na: [Your Email - to be added]
-2. Nebo použijte GitHub Security Advisory: https://github.com/navratilpetr/trv_regulator/security/advisories/new
+Místo toho použijte GitHub Security Advisory:
+https://github.com/navratilpetr/trv_regulator/security/advisories/new
 
 ### Co zahrnout v reportu
 
