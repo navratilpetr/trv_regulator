@@ -15,6 +15,21 @@ Custom integrace pro Home Assistant - **ON/OFF řízení s adaptivním učením*
 - **Config Flow:** Kompletní konfigurace přes UI (bez YAML)
 - **Persistence:** Ukládá naučené parametry a historii posledních 100 cyklů
 
+### 🆕 Pokročilé funkce (v3.0.9)
+
+- ✅ **POST-VENT režim** - Automatické inteligentní dotopení po větrání
+  - Systém detekuje zavření okna a automaticky přepne do režimu "dotápění"
+  - První topný cyklus po větrání ignoruje naučený čas a topí až do dosažení cílové teploty
+  - Řeší problém nedotopení po větším poklesu teploty během větrání
+  
+- 🎛️ **Výběr aktivních TRV hlavic**
+  - V místnostech s více TRV hlavicemi lze jednotlivé hlavice vypnout přes UI
+  - Nastavení → Integrace → TRV Regulator → Možnosti
+  
+- 🔧 **Manuální reset parametrů**
+  - Service pro reset naučených parametrů: `trv_regulator.reset_learned_params`
+  - Užitečné po výměně radiátoru, TRV hlavice nebo změně podmínek
+
 ## 📦 Instalace
 
 ### Pomocí HACS (doporučeno)
@@ -262,6 +277,29 @@ Topení > max_heating_duration → force stop
 → Přejde do IDLE
 → Označí cyklus jako nevalidní
 ```
+
+## 🔧 Services
+
+### `trv_regulator.reset_learned_params`
+
+Resetuje naučené parametry pro vybranou místnost a spustí učení znovu.
+
+**Parametry:**
+- `entity_id` (volitelné): Climate entita (např. `climate.trv_regulator_loznice`)
+- `room` (volitelné): Název místnosti (např. `loznice`)
+
+**Příklad:**
+```yaml
+service: trv_regulator.reset_learned_params
+data:
+  entity_id: climate.trv_regulator_loznice
+```
+
+**Kdy použít:**
+- Po výměně radiátoru
+- Po výměně TRV hlavice
+- Po změně podmínek v místnosti
+- Když chcete začít učení od začátku
 
 ## 💾 Persistence
 

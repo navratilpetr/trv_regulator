@@ -1,0 +1,18 @@
+reset_learned_params:
+  name: Reset naučených parametrů
+  description: Smaže naučené parametry a spustí učení znovu
+  fields:
+    entity_id:
+      name: Entity ID
+      description: Climate entita TRV Regulatoru (např. climate.trv_regulator_loznice)
+      example: "climate.trv_regulator_loznice"
+      selector:
+        entity:
+          domain: climate
+          integration: trv_regulator
+    room:
+      name: Místnost
+      description: Název místnosti (alternativa k entity_id)
+      example: "loznice"
+      selector:
+        text:

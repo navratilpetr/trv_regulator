@@ -46,6 +46,7 @@
         "title": "Upravit nastavení",
         "description": "Změňte parametry bez odebrání integrace",
         "data": {
+          "enabled_trv_entities": "Aktivní TRV hlavice",
           "window_entities": "Okna (binary_sensor)",
           "hysteresis": "Hystereze (°C, 0.0-2.0)",
           "window_open_delay": "Zpoždění větrání (s, 30-600)",
@@ -57,6 +58,9 @@
           "cooldown_duration": "Doba cooldown (s, 600-1800)"
         }
       }
+    },
+    "error": {
+      "at_least_one_trv_required": "Minimálně jedna TRV hlavice musí být aktivní"
     }
   }
 }

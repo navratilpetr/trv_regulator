@@ -88,6 +88,9 @@ class RoomController:
         self._avg_overshoot = None
         self._last_learned = None
         
+        # POST-VENT režim
+        self._post_vent_mode = False
+        
         # Aktuální cyklus
         self._current_cycle = {}
         self._heating_start_time = None
@@ -506,13 +509,21 @@ class RoomController:
                     return STATE_COOLDOWN
                 
                 # Rozhodnout podle fáze učení
-                if self._is_learning:
-                    # LEARNING: topíme dokud nedosáhneme targetu
+                if self._post_vent_mode or self._is_learning:
+                    # POST-VENT nebo LEARNING: topíme dokud nedosáhneme targetu
                     if temp >= target:
-                        _LOGGER.info(
-                            f"TRV [{self._room_name}]: Target reached in LEARNING mode "
-                            f"(temp={temp:.1f}°C >= target={target:.1f}°C) after {elapsed:.0f}s"
-                        )
+                        if self._post_vent_mode:
+                            _LOGGER.info(
+                                f"TRV [{self._room_name}]: POST-VENT target reached "
+                                f"after {elapsed:.0f}s, switching to COOLDOWN"
+                            )
+                            self._post_vent_mode = False  # Vypnout flag
+                        else:
+                            # Existující log pro LEARNING režim
+                            _LOGGER.info(
+                                f"TRV [{self._room_name}]: Target reached in LEARNING mode "
+                                f"(temp={temp:.1f}°C >= target={target:.1f}°C) after {elapsed:.0f}s"
+                            )
                         return STATE_COOLDOWN
                 else:
                     # LEARNED: vypnout podle času NEBO při dosažení targetu
@@ -577,6 +588,14 @@ class RoomController:
         
         # Akce podle nového stavu
         if new_state == STATE_HEATING:
+            # Pokud přecházíme z VENT, zapnout POST-VENT režim
+            if old_state == STATE_VENT:
+                self._post_vent_mode = True
+                _LOGGER.info(
+                    f"TRV [{self._room_name}]: Starting POST-VENT heating "
+                    "(will heat to target regardless of learned time)"
+                )
+            
             await self._start_heating(temp, target)
         
         elif new_state == STATE_COOLDOWN:
@@ -625,11 +644,17 @@ class RoomController:
             "start_temp": temp,
             "target": target,
             "valid": True,  # Předpokládáme validitu, může být změněno
+            "post_vent": self._post_vent_mode,  # Označit POST-VENT cyklus
         }
         
         await self._set_all_trv(TRV_ON)
         
-        if self._is_learning:
+        if self._post_vent_mode:
+            _LOGGER.info(
+                f"TRV [{self._room_name}]: Started POST-VENT cycle "
+                f"(will heat until target is reached)"
+            )
+        elif self._is_learning:
             _LOGGER.info(
                 f"TRV [{self._room_name}]: Started LEARNING cycle "
                 f"({self._valid_cycles_count}/{self._learning_cycles_required})"
@@ -701,6 +726,14 @@ class RoomController:
         """Zkontrolovat zda je cyklus validní pro učení."""
         # Pokud byl manuálně invalidován (okno, změna targetu)
         if not cycle.get("valid", True):
+            return False
+        
+        # POST-VENT cykly nepoužívat pro učení
+        if cycle.get("post_vent", False):
+            _LOGGER.debug(
+                f"TRV [{self._room_name}]: Cycle invalid - POST-VENT recovery cycle "
+                "(not used for learning)"
+            )
             return False
         
         heating_duration = cycle.get("heating_duration", 0)
@@ -889,3 +922,30 @@ class RoomController:
             if state and state.state == "on":
                 return True
         return False
+
+    async def reset_learned_params(self):
+        """Manuálně resetovat naučené parametry."""
+        _LOGGER.warning(
+            f"TRV [{self._room_name}]: Resetting learned parameters - "
+            "starting fresh learning"
+        )
+        
+        # Reset parametrů
+        self._avg_heating_duration = None
+        self._time_offset = 0
+        self._avg_overshoot = None
+        self._is_learning = True
+        self._valid_cycles_count = 0
+        self._last_learned = None
+        
+        # Smazat historii
+        self._history.clear()
+        self._performance_history.clear()
+        
+        # Uložit do JSON
+        await self._save_learned_params()
+        
+        _LOGGER.info(
+            f"TRV [{self._room_name}]: Reset complete, learning mode activated "
+            f"({self._learning_cycles_required} cycles required)"
+        )

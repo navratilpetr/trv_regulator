@@ -9,7 +9,7 @@ STATE_ERROR = "error"
 
 # TRV příkazy
 TRV_ON = {"hvac_mode": "heat", "temperature": 35}
-TRV_OFF = {"hvac_mode": "off", "temperature": 5}
+TRV_OFF = {"hvac_mode": "heat", "temperature": 5}
 
 # Výchozí hodnoty
 DEFAULT_HYSTERESIS = 0.3
