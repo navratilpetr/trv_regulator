@@ -1,0 +1,4 @@
+# Production dependencies
+# TRV Regulator is a Home Assistant custom component
+# All dependencies are provided by Home Assistant
+# This file is kept for reference only

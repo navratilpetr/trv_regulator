@@ -1,5 +1,12 @@
 # TRV Regulator
 
+[![GitHub Release](https://img.shields.io/github/v/release/navratilpetr/trv_regulator)](https://github.com/navratilpetr/trv_regulator/releases)
+[![CI](https://github.com/navratilpetr/trv_regulator/actions/workflows/ci.yaml/badge.svg)](https://github.com/navratilpetr/trv_regulator/actions/workflows/ci.yaml)
+[![CodeQL](https://github.com/navratilpetr/trv_regulator/actions/workflows/codeql.yaml/badge.svg)](https://github.com/navratilpetr/trv_regulator/actions/workflows/codeql.yaml)
+[![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+
 Custom integrace pro Home Assistant - **ON/OFF řízení s adaptivním učením** pro vytápění po místnostech pomocí TRV hlavic.
 
 ## ✨ Vlastnosti
@@ -488,7 +495,39 @@ MIT
 
 ## 🤝 Přispívání
 
-Pull requesty jsou vítány! Pro větší změny nejdříve otevři issue pro diskuzi.
+Příspěvky jsou vítány! 🎉
+
+- **Bug reports**: Použijte [Issue Tracker](https://github.com/navratilpetr/trv_regulator/issues)
+- **Feature requests**: Navrhněte novou funkcionalitu pomocí [Feature Request](https://github.com/navratilpetr/trv_regulator/issues/new?template=feature_request.md)
+- **Pull Requests**: Přečtěte si [CONTRIBUTING.md](CONTRIBUTING.md) pro detaily
+
+### Development
+
+```bash
+# Klonování
+git clone https://github.com/navratilpetr/trv_regulator.git
+cd trv_regulator
+
+# Instalace dev závislostí
+pip install -r requirements-dev.txt
+
+# Pre-commit hooks
+pre-commit install
+
+# Spuštění testů
+pytest tests/
+
+# Linting
+ruff check custom_components/
+black --check custom_components/
+mypy custom_components/trv_regulator/
+```
+
+Více informací v [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## 🔒 Bezpečnost
+
+Pokud najdete bezpečnostní zranitelnost, prosím **nehlaste ji veřejně**. Přečtěte si [SECURITY.md](SECURITY.md) pro instrukce.
 
 ## ⭐ Podpora
 
