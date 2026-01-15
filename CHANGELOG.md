@@ -45,6 +45,16 @@ a projekt dodržuje [sémantické verzování](https://semver.org/lang/cs/).
 - Podpora pro dict formát TRV entities s `enabled` flagem
 - Vytvořen soubor `services.yaml` s definicí služby
 
+## [3.0.8] - 2026-01-15
+
+### Technické
+- Automatický bump verze (GitHub Actions)
+
+## [3.0.7] - 2026-01-14
+
+### Technické
+- Automatický bump verze (GitHub Actions)
+
 ## [3.0.6] - 2026-01-14
 
 ### Přidáno
