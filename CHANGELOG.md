@@ -5,6 +5,41 @@ Všechny významné změny v projektu budou dokumentovány v tomto souboru.
 Formát vychází z [Keep a Changelog](https://keepachangelog.com/cs/1.0.0/),
 a projekt dodržuje [sémantické verzování](https://semver.org/lang/cs/).
 
+## [3.0.10] - 2026-01-15
+
+### Přidáno
+- 📊 **Statistické senzory**
+  - `sensor.trv_regulator_{room}_stats` - kompletní statistiky pro každou místnost
+    - Celkové/validní/nevalidní cykly, úspěšnost
+    - Průměrná/min/max doba topení
+    - Průměrný/min/max překmit
+    - První/poslední cyklus, dny v provozu, průměr cyklů za den
+  - `sensor.trv_regulator_summary` - přehled všech místností
+    - Seznam místností se stavem a statistikami
+    - Celkový počet cyklů
+    - Počet naučených/učících se místností
+
+- 📈 **Long-term statistiky (měsíční agregace)**
+  - Automatické ukládání měsíčních statistik do JSON
+  - Průměrná doba topení, překmit, počet cyklů za měsíc
+  - Historie až 24 měsíců (2 roky)
+  - Automatické mazání starších záznamů
+
+- 🔍 **Diagnostic sensor**
+  - `sensor.trv_regulator_{room}_diagnostics` - diagnostické informace
+  - Stav všech komponent (senzory teploty/targetu/okna, TRV hlavice)
+  - Status (online/offline), poslední aktualizace
+  - Statistiky invalidovaných cyklů podle důvodu
+  - Aktuální konfigurace místnosti
+  - Celkový health status (healthy/warning/error)
+
+### Technické detaily
+- Nové sensor třídy v `sensor.py`: TrvStatsSensor, TrvSummarySensor, TrvDiagnosticsSensor
+- Měsíční agregace v metodě `_aggregate_monthly_stats()` v RoomController
+- Rozšíření JSON persistence o `monthly_stats`
+- Summary sensor sdílený napříč všemi místnostmi
+- Diagnostic sensor s entity_category="diagnostic"
+
 ## [3.0.9] - 2026-01-15
 
 ### Změněno

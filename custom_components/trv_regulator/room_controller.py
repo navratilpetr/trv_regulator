@@ -102,6 +102,9 @@ class RoomController:
         # Historie cyklů
         self._history = []
         
+        # Monthly stats
+        self._monthly_stats = {}
+        
         # Performance history pro kontinuální učení (klouzavý průměr)
         self._performance_history = deque(maxlen=self._learning_cycles_required)
         
@@ -225,6 +228,7 @@ class RoomController:
                 self._last_learned = room_data.get("last_learned")
                 self._avg_overshoot = room_data.get("avg_overshoot")
                 self._history = room_data.get("history", [])[-HISTORY_SIZE:]
+                self._monthly_stats = room_data.get("monthly_stats", {})
                 
                 # Načíst performance_history
                 performance_data = room_data.get("performance_history", [])
@@ -249,8 +253,62 @@ class RoomController:
         except Exception as e:
             _LOGGER.error(f"TRV [{self._room_name}]: Failed to load learned params: {e}")
 
+    def _aggregate_monthly_stats(self):
+        """Agregovat statistiky pro aktuální měsíc."""
+        if not self._history:
+            return
+        
+        # Aktuální měsíc
+        now = datetime.now()
+        current_month = now.strftime("%Y-%m")
+        
+        # Filtrovat cykly z aktuálního měsíce
+        month_cycles = []
+        for cycle in self._history:
+            cycle_time = datetime.fromtimestamp(cycle["timestamp"])
+            if cycle_time.strftime("%Y-%m") == current_month:
+                month_cycles.append(cycle)
+        
+        if not month_cycles:
+            return
+        
+        # Validní cykly
+        valid = [c for c in month_cycles if c.get("valid", False)]
+        
+        if not valid:
+            return
+        
+        # Agregovat
+        durations = [c.get("heating_duration", 0) for c in valid]
+        overshoots = [c.get("overshoot", 0) for c in valid]
+        
+        first = datetime.fromtimestamp(month_cycles[0]["timestamp"])
+        last = datetime.fromtimestamp(month_cycles[-1]["timestamp"])
+        days = (last - first).days + 1
+        
+        self._monthly_stats[current_month] = {
+            "avg_heating_duration": int(sum(durations) / len(durations)),
+            "avg_overshoot": round(sum(overshoots) / len(overshoots), 2),
+            "total_cycles": len(month_cycles),
+            "valid_cycles": len(valid),
+            "avg_cycles_per_day": round(len(month_cycles) / days, 1) if days > 0 else 0,
+            "first_cycle": first.isoformat(),
+            "last_cycle": last.isoformat(),
+            "min_heating_duration": int(min(durations)),
+            "max_heating_duration": int(max(durations)),
+        }
+        
+        # Cleanup - ponechat jen posledních 24 měsíců
+        if len(self._monthly_stats) > 24:
+            sorted_months = sorted(self._monthly_stats.keys())
+            for old_month in sorted_months[:-24]:
+                del self._monthly_stats[old_month]
+
     async def _save_learned_params(self):
         """Uložit naučené parametry do úložiště."""
+        # Agregovat měsíční statistiky
+        self._aggregate_monthly_stats()
+        
         storage_path = os.path.join(
             self._hass.config.path(STORAGE_DIR),
             STORAGE_FILE
@@ -277,6 +335,7 @@ class RoomController:
             "avg_overshoot": self._avg_overshoot,
             "history": self._history[-HISTORY_SIZE:],
             "performance_history": list(self._performance_history),
+            "monthly_stats": self._monthly_stats,
         }
         
         # Zajistit existenci adresáře
