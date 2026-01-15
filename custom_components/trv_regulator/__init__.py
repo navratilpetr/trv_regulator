@@ -209,10 +209,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Najít room_controller
         domain_data = hass.data.get(DOMAIN, {})
         room = None
+        
         for key, value in domain_data.items():
-            if hasattr(value, "_room") and hasattr(value._room, "_room_name") and value._room._room_name == room_name:
-                room = value._room
-                break
+            try:
+                # Coordinator má atribut _room, který je RoomController
+                if hasattr(value, "_room") and value._room._room_name == room_name:
+                    room = value._room
+                    break
+            except (AttributeError, TypeError):
+                # Skip entries that don't match expected structure
+                continue
         
         if not room:
             _LOGGER.error(f"reset_learned_params: room '{room_name}' not found")

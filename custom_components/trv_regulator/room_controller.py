@@ -426,6 +426,13 @@ class RoomController:
             self._current_cycle["valid"] = False
             self._current_cycle["invalidation_reason"] = "target_changed_during_cooldown"
         
+        # Reset POST-VENT flag pokud je změna targetu během HEATING nebo COOLDOWN
+        if self._post_vent_mode and self._state in (STATE_HEATING, STATE_COOLDOWN):
+            self._post_vent_mode = False
+            _LOGGER.debug(
+                f"TRV [{self._room_name}]: POST-VENT mode cancelled due to target change"
+            )
+        
         # Vynutit refresh pomocí callback
         if self._refresh_callback:
             await self._refresh_callback()
@@ -613,6 +620,12 @@ class RoomController:
                 )
                 self._current_cycle["valid"] = False
                 self._current_cycle["invalidation_reason"] = "window_opened_during_heating"
+                # Reset POST-VENT flag pokud byl aktivní
+                if self._post_vent_mode:
+                    self._post_vent_mode = False
+                    _LOGGER.debug(
+                        f"TRV [{self._room_name}]: POST-VENT mode cancelled due to window opening"
+                    )
             elif old_state == STATE_COOLDOWN:
                 _LOGGER.info(
                     f"TRV [{self._room_name}]: Window opened during COOLDOWN, "
