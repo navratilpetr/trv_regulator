@@ -67,186 +67,63 @@ Custom integrace pro Home Assistant - **ON/OFF řízení s adaptivním učením*
 - **Hystereze** - rozsah teplot pro přepínání stavů (0.0-2.0°C, výchozí: 0.3°C)
 - **Zpoždění větrání** - čas do aktivace větrání (30-600s, výchozí: 120s)
 
-### Parametry učení:
-- **Počet cyklů pro učení** - velikost klouzavého průměru (5-30, výchozí: 10)
-  - Menší číslo (5) = rychlejší adaptace na změny
-  - Větší číslo (20) = pomalejší adaptace, stabilnější
-- **Požadovaný překmit** - cílový překmit v °C (0.0-0.5°C, výchozí: 0.1°C)
-- **Min. doba topení** - minimální validní doba topení (60-600s, výchozí: 180s / 3 min)
-- **Max. doba topení** - maximální validní doba topení (900-10800s, výchozí: 7200s / 120 min)
-- **Max. validní překmit** - maximální přípustný překmit (1.0-5.0°C, výchozí: 3.0°C)
-- **Doba cooldown** - jak dlouho měřit překmit (600-1800s, výchozí: 1200s / 20 min)
+### Parametry učení
 
-## 🎯 ON/OFF řízení s adaptivním učením
+| Parametr | Rozsah | Výchozí | Popis |
+|----------|--------|---------|-------|
+| Počet cyklů pro učení | 5-30 | 10 | Velikost klouzavého průměru |
+| Požadovaný překmit | 0.0-0.5°C | 0.1°C | Cílový překmit |
+| Min. doba topení | 60-600s | 180s | Minimální validní čas |
+| Max. doba topení | 900-10800s | 7200s | Maximální validní čas |
+| Max. validní překmit | 1.0-5.0°C | 3.0°C | Limit pro validaci |
+| Doba cooldown | 600-1800s | 1200s | Jak dlouho měřit překmit |
 
-### Jak to funguje
+## 🎯 Jak to funguje
 
-Integrace používá **dvoustupňové ON/OFF řízení** s časovým prediktivním vypínáním:
+Integrace používá **ON/OFF řízení** s prediktivním vypínáním:
 
-#### Fáze 1: LEARNING (prvních X cyklů)
+### Učící fáze (prvních 10 cyklů)
+- Systém měří jak dlouho trvá ohřát místnost na cílovou teplotu
+- Měří překmit (o kolik teplota přestřelí cíl)
+- Po 10 validních cyklech vypočítá optimální čas vypnutí
 
-```
-1. Zapne TRV na 35°C
-2. Topí dokud teplota nedosáhne targetu
-3. Měří kolik to trvalo (heating_duration)
-4. Vypne TRV na 5°C
-5. Měří překmit (max. teplota - target) po dobu 20 min
-6. Validuje cyklus (nebyl přerušen oknem, změnou targetu, atd.)
-7. Po 10 validních cyklech vypočítá:
-   - avg_heating_duration (průměrná doba topení)
-   - time_offset (kolik sekund dřív vypnout)
-```
+### Naučený režim
+- Vypíná topení PŘED dosažením cíle (podle naučeného času)
+- Minimalizuje překmit na ~0.1°C
+- Průběžně se adaptuje pomocí klouzavého průměru z posledních N cyklů
 
-#### Fáze 2: LEARNED (kontinuální učení s klouzavým průměrem)
+Systém automaticky ignoruje cykly přerušené okny, změnou teploty atd.
 
-```
-1. Zapne TRV na 35°C
-2. Vypne když:
-   - Uplyne plánovaný čas: avg_heating_duration - time_offset
-   - NEBO dosáhne cílové teploty (bezpečnostní pojistka)
-3. Měří skutečný překmit
-4. Po každém validním cyklu přepočítá parametry z posledních N cyklů:
-   - Přidá nový cyklus, odstraní nejstarší
-   - Přepočítá avg_heating_duration a time_offset z klouzavého průměru
-   - Automatická adaptace na změny počasí
-```
+## 📊 Stavy systému
 
-### Příklad
-
-**Místnost:** Kuchyň, target 22°C
-
-**Learning fáze (prvních 10 cyklů):**
-```
-Cyklus 1: Topí 25 min, dosáhne 22°C, překmit 0.3°C ✓ validní
-Cyklus 2: Topí 23 min, dosáhne 22°C, překmit 0.2°C ✓ validní
-Cyklus 3: Okno otevřeno po 10 min ✗ nevalidní (ignorovat)
-...
-Cyklus 11: 10 validních cyklů → průměr 24 min, překmit 0.25°C
-
-Výpočet:
-avg_heating_duration = 1440s (24 min)
-avg_overshoot = 0.25°C
-desired_overshoot = 0.1°C
-→ time_offset = (0.25 - 0.1) × 300 = 45s
-```
-
-**Learned fáze:**
-```
-Zapne TRV, topí 1440s - 45s = 1395s (23:15 min)
-Vypne PŘED dosažením targetu
-Měří překmit: 0.12°C ✓ blízko cíli (0.1°C)
-
-Cyklus 12 (po naučení):
-Překmit 0.3°C
-
-Klouzavý průměr z posledních 10 cyklů:
-- Odstraní cyklus 1, přidá cyklus 12
-- Nový avg_overshoot = 0.27°C
-- Přepočítá time_offset = (0.27 - 0.1) × 300 = 51s
-→ Příště vypne o 51s dřív (postupná adaptace)
-```
-
-## 📊 Stavový automat
-
-```
-IDLE ←→ HEATING ←→ COOLDOWN
-  ↕       ↕           ↕
-VENT ←→ (pause)    (pause)
-  ↕
-ERROR
-```
-
-### Stavy:
-- **idle** - Teplota OK, TRV vypnutá (5°C)
+- **idle** - Teplota OK, TRV vypnutá
 - **heating** - Aktivně topí, TRV zapnutá (35°C)
-- **cooldown** - Po vypnutí, měří překmit (20 min), TRV vypnutá (5°C)
-- **vent** - Okno otevřeno > delay, TRV vypnutá (5°C)
-- **error** - Senzor/TRV offline, TRV vypnutá (5°C)
+- **cooldown** - Po vypnutí měří překmit (20 min)
+- **vent** - Okno otevřeno, TRV vypnutá
+- **error** - Senzor/TRV offline, TRV vypnutá
 
-### Přechody:
-- `IDLE → HEATING`: teplota ≤ target − hystereze
-- `HEATING → COOLDOWN`: vypršel čas topení (nebo dosažen target při učení)
-- `COOLDOWN → IDLE`: uplynulo 20 min NEBO teplota klesá
-- `COOLDOWN → HEATING`: teplota < target − hystereze (nový cyklus)
-- `* → VENT`: okno otevřeno > window_open_delay
-- `VENT → IDLE/HEATING`: okno se zavře (okamžitě vyhodnotit)
-- `* → ERROR`: senzor offline > 2 min NEBO TRV offline > 5 min
+Systém automaticky přepína mezi stavy podle teploty, stavu oken a dostupnosti zařízení.
 
 ## 📊 Diagnostické senzory
 
-Pro každou místnost se automaticky vytvoří tyto senzory:
+Pro každou místnost:
 
-### 1. `sensor.trv_regulator_{room}_state`
-Aktuální stav automatu s atributy:
-```yaml
-state: "heating"
-attributes:
-  current_temp: 21.5
-  target_temp: 22.0
-  heating_start_time: "2026-01-12T18:30:00"
-  heating_elapsed_seconds: 450
-  heating_remaining_seconds: 1050  # pouze v LEARNED režimu
-```
+- **`sensor.trv_regulator_{room}_state`** - Aktuální stav (idle/heating/cooldown/vent/error)
+- **`sensor.trv_regulator_{room}_learning`** - Stav učení a naučené parametry
+- **`sensor.trv_regulator_{room}_last_cycle`** - Data z posledního topného cyklu  
+- **`sensor.trv_regulator_{room}_history`** - Historie posledních 100 cyklů
+- **`sensor.trv_regulator_{room}_stats`** - Statistiky (průměry, úspěšnost)
+- **`sensor.trv_regulator_{room}_diagnostics`** - Stav komponent (diagnostic entity)
 
-### 2. `sensor.trv_regulator_{room}_learning`
-Stav učení s parametry:
-```yaml
-state: "learned"
-attributes:
-  valid_cycles: 15
-  required_cycles: 10
-  avg_heating_duration: 1500  # sekund
-  time_offset: 180  # sekund
-  avg_overshoot: 0.15  # °C
-```
+Pro celou integraci:
+- **`sensor.trv_regulator_summary`** - Přehled všech místností
 
-### 3. `sensor.trv_regulator_{room}_last_cycle`
-Poslední topný cyklus:
-```yaml
-state: "2026-01-12T18:00:00"
-attributes:
-  heating_duration: 1480  # sekund
-  overshoot: 0.12  # °C
-  start_temp: 20.5
-  stop_temp: 22.0
-  max_temp: 22.12
-  valid: true
-```
+## ⚙️ Rychlost reakce
 
-### 4. `sensor.trv_regulator_{room}_history`
-Historie cyklů:
-```yaml
-state: 100  # počet cyklů
-attributes:
-  cycles:
-    - timestamp: 1736709600
-      heating_duration: 1480
-      overshoot: 0.12
-      valid: true
-    # ... až 100 cyklů
-```
-
-## ⚙️ Reagování na události
-
-### Teplota pokoje (Zigbee senzor):
-- ✅ Reaguje na **každou změnu** (senzor posílá jen při změně)
-- ✅ Spustí update okamžitě
-
-### Cílová teplota (input_number):
-- ✅ **Debounce 15 sekund** (uživatel posouvá slider)
-- ✅ Po 15s bez změny → aplikuje změnu
-- ✅ Během debounce zruší předchozí timer
-
-### Stav oken:
-- ✅ **Debounce** (výchozí: 120s, konfigurovatelné)
-- ✅ Když se okno otevře → počká X sekund
-- ✅ Pokud je **stále otevřené** → přejde do VENT
-- ✅ Pokud se **mezitím zavřelo** → ignoruje (pokračuje v topení)
-
-### Periodický update:
-- ✅ **Každých 30 sekund**
-- ✅ Přesné časování vypnutí
-- ✅ Kontrola timerů
+- **Teplota pokoje** - Okamžitá reakce při každé změně
+- **Cílová teplota** - Debounce 15s (čeká na konec úpravy)
+- **Okna** - Debounce 120s (ignoruje krátké větrání)
+- **Periodický update** - Každých 30s (kontrola timerů)
 
 ## 🛠️ Error Handling
 
@@ -331,63 +208,7 @@ Naučené parametry se ukládají do `.storage/trv_regulator_learned_params.json
 }
 ```
 
-## ⚠️ Breaking Changes (verze 2.0.0)
 
-### Kompletní přepsání z proporcionální regulace na ON/OFF
-
-**Verze 2.0.0** přináší **zásadní breaking change**:
-
-#### Co se změnilo:
-- ❌ **Odstraněno:** Proporcionální regulace (gain × diff + offset)
-- ❌ **Odstraněno:** Závislost na `heating_water_temp_entity`
-- ❌ **Odstraněno:** Využití `current_temperature` z TRV hlavice
-- ❌ **Odstraněno:** State `POST_VENT`
-- ❌ **Odstraněno:** Senzory `gain`, `offset`, `oscillation`
-- ✅ **Nové:** ON/OFF řízení (35°C / 5°C)
-- ✅ **Nové:** Učící režim + prediktivní vypínání
-- ✅ **Nové:** Adaptivní úprava time_offset
-- ✅ **Nové:** Senzory `state`, `learning`, `last_cycle`, `history`
-
-#### Migrace z verze 0.x:
-
-**⚠️ POZOR: Nelze upgradeovat bez odebrání a opětovného přidání integrace!**
-
-1. **Záloha konfigurace:**
-   - Poznamenej si názvy místností a entity
-   - Naučené parametry (gain/offset) **nelze převést**
-
-2. **Odebrat starou integraci:**
-   ```
-   Nastavení → Zařízení a služby → TRV Regulator
-   → Klikni na místnost → Odstranit
-   ```
-
-3. **Aktualizovat na verzi 2.0.0:**
-   - HACS → TRV Regulator → Aktualizovat
-   - Restart Home Assistant
-
-4. **Přidat novou integraci:**
-   ```
-   Nastavení → Zařízení a služby → Přidat integraci → TRV Regulator
-   ```
-   - **NEZADÁVEJ** `heating_water_temp_entity` (už není v konfiguračním formuláři)
-   - Nastav nové parametry učení (nebo ponech výchozí)
-
-5. **Počkat na naučení:**
-   - Prvních 10 cyklů bude systém **učit**
-   - Sleduj `sensor.trv_regulator_{room}_learning`
-   - Po naučení přejde do **prediktivního** režimu
-
-#### Co očekávat po upgradu:
-
-**První den:**
-- Systém se učí → může být větší překmit (±0.5-1°C)
-- Sleduj senzor `learning` - počítá validní cykly
-
-**Po naučení:**
-- Přesnější regulace díky predikci
-- Minimální překmit (cílově ±0.1°C)
-- Průběžné adaptivní učení
 
 ## 📝 Logování
 
@@ -407,76 +228,31 @@ Pro zobrazení logů:
 Nastavení → Systém → Protokoly → Hledat "TRV"
 ```
 
-## 🧪 Testování
 
-### Test 1: Učící režim
-1. Přidej novou místnost
-2. Sleduj `sensor.trv_regulator_{room}_learning`
-3. Počkej na 10 validních cyklů
-4. Zkontroluj že `state` přešel z "learning" na "learned"
-
-### Test 2: Prediktivní vypínání
-1. Po naučení sleduj `sensor.trv_regulator_{room}_state`
-2. V atributech `heating_remaining_seconds` by měl odpočítávat
-3. TRV by mělo vypnout PŘED dosažením targetu
-
-### Test 3: Krátké větrání
-1. Otevři okno na 30 sekund
-2. Zavři okno
-3. Sleduj log → očekáváno: žádná změna (pod vent_delay)
-
-### Test 4: Dlouhé větrání
-1. Otevři okno na 3 minuty
-2. Sleduj log → očekáváno: přechod do VENT (po 120s)
-3. Pokud topilo → cyklus bude invalidní
-4. Zavři okno
-5. Sleduj log → okamžitě vyhodnotí teplotu
-
-### Test 5: Kontinuální učení (klouzavý průměr)
-1. V learned režimu sleduj `last_cycle` sensor
-2. Zkontroluj `overshoot` každého cyklu
-3. Sleduj jak se `time_offset` upravuje v `learning` sensoru
-4. Parametry se postupně adaptují podle klouzavého průměru
-5. Rychlost změn závisí na `learning_cycles_required`:
-   - 5 cyklů = rychlé změny (20% vliv nového cyklu)
-   - 10 cyklů = střední rychlost (10% vliv)
-   - 20 cyklů = pomalé změny (5% vliv)
 
 ## 🐛 Řešení problémů
 
-### TRV se nespínají
-- Zkontroluj, že entity TRV jsou ve stavu `available`
-- Ověř, že TRV podporují `climate.set_hvac_mode` a `climate.set_temperature`
-- Zkontroluj logy pro chybové hlášky
+**TRV se nespínají**
+- Zkontroluj dostupnost entit v Developer Tools → States
+- Ověř podporu `climate.set_hvac_mode` služby
 
-### Systém přešel do ERROR
-- Zkontroluj dostupnost teplotního senzoru
-- Zkontroluj dostupnost TRV hlavic
-- ERROR se automaticky vymaže když se entity vrátí
+**Systém v ERROR stavu**
+- Zkontroluj teplotní senzor a TRV hlavice
+- ERROR se vymaže automaticky když se zařízení vrátí
 
-### Učení trvá dlouho
-- Zkontroluj `sensor.trv_regulator_{room}_learning`
-- Sleduj `valid_cycles` vs `required_cycles`
+**Učení trvá dlouho**
+- Sleduj `sensor.trv_regulator_{room}_learning` → `valid_cycles`
 - Nevalidní cykly (okno, změna targetu) se nepočítají
 
-### Velký překmit
-- V learning režimu normální (až ±1°C)
-- V learned režimu se automaticky adaptuje pomocí klouzavého průměru
-- Pokud přetrvává:
-  - Zkus snížit `learning_cycles_required` na 5 (rychlejší adaptace)
-  - Nebo zvýš `desired_overshoot` na 0.2°C (tolerantnější)
+**Velký překmit**
+- V learning režimu normální (±1°C)
+- Po naučení se automaticky adaptuje
+- Zkus snížit `learning_cycles_required` na 5
 
-## 🔄 Verzování
+**Další problémy?**
+Otevři issue na [GitHubu](https://github.com/navratilpetr/trv_regulator/issues)
 
-Integrace používá [sémantické verzování](https://semver.org/lang/cs/) (SemVer):
 
-- **2.0.0** - Major breaking change (přechod na ON/OFF)
-- **2.x.0** - Minor změny (nové funkce)
-- **2.x.x** - Patch změny (bugfixy)
-
-### Aktuální verze
-
-Aktuální verzi najdeš v souboru `custom_components/trv_regulator/manifest.json`.
 
 ## 📄 Licence
 
