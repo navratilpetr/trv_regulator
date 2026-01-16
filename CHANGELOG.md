@@ -250,6 +250,8 @@ Tato verze přináší **kompletní přepsání regulační logiky** z proporcio
 
 **Poznámka:** Naučené parametry z verze 0.x nebo 2.x (gain/offset) **nelze převést** na nový systém.
 
+## [3.0.14] - 2026-01-16
+
 ## [Unreleased]
 
 ### Přidáno
