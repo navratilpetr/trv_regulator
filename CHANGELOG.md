@@ -5,6 +5,14 @@ Všechny významné změny v projektu budou dokumentovány v tomto souboru.
 Formát vychází z [Keep a Changelog](https://keepachangelog.com/cs/1.0.0/),
 a projekt dodržuje [sémantické verzování](https://semver.org/lang/cs/).
 
+## [3.0.13] - 2026-01-16
+
+### Opraveno
+- 🐛 **ValueError při vytváření diagnostics sensoru**
+  - Opraveno: `entity_category` nyní používá `EntityCategory.DIAGNOSTIC` enum místo stringu `"diagnostic"`
+  - Diagnostics sensor se nyní správně vytváří a je viditelný v UI
+  - Přidán import `from homeassistant.helpers.entity import EntityCategory`
+
 ## [3.0.12] - 2026-01-16
 
 ### Opraveno

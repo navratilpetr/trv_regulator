@@ -7,6 +7,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.entity import EntityCategory
 
 from .const import DOMAIN
 
@@ -300,7 +301,7 @@ class TrvDiagnosticsSensor(TrvBaseSensor):
         super().__init__(coordinator, room_name, entry_id, "diagnostics")
         self._attr_name = f"TRV {room_name} Diagnostics"
         self._attr_icon = "mdi:stethoscope"
-        self._attr_entity_category = "diagnostic"
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
     def native_value(self):
