@@ -48,7 +48,7 @@ jobs:
             TYPE="patch"
           fi
 
-          echo "type=$TYPE" >> $GITHUB_OUTPUT
+          echo "type=$TYPE" >> "$GITHUB_OUTPUT"
 
       # --------------------------------------------------
       # 3) Nacteni aktualni verze
@@ -57,7 +57,7 @@ jobs:
         id: current
         run: |
           VERSION=$(jq -r '.version' custom_components/trv_regulator/manifest.json)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       # --------------------------------------------------
       # 4) Vypocet nove verze
@@ -86,7 +86,7 @@ jobs:
           esac
 
           NEW_VERSION="$MAJOR.$MINOR.$PATCH"
-          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
 
       # --------------------------------------------------
       # 5) Update manifest.json bezpecne pres jq
@@ -119,9 +119,9 @@ jobs:
         id: pre
         run: |
           if [ "${{ steps.bump.outputs.type }}" = "patch" ]; then
-            echo "pre=false" >> $GITHUB_OUTPUT
+            echo "pre=false" >> "$GITHUB_OUTPUT"
           else
-            echo "pre=true" >> $GITHUB_OUTPUT
+            echo "pre=true" >> "$GITHUB_OUTPUT"
           fi
 
       # --------------------------------------------------
