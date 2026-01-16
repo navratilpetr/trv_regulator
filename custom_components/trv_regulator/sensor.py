@@ -75,7 +75,7 @@ class TrvStateSensor(TrvBaseSensor):
     def __init__(self, coordinator, room_name: str, entry_id: str):
         """Inicializace state senzoru."""
         super().__init__(coordinator, room_name, entry_id, "state")
-        self._attr_name = f"TRV {room_name} State"
+        self._attr_name = "State"
         self._attr_icon = "mdi:state-machine"
 
     @property
@@ -117,7 +117,7 @@ class TrvLearningSensor(TrvBaseSensor):
     def __init__(self, coordinator, room_name: str, entry_id: str):
         """Inicializace learning senzoru."""
         super().__init__(coordinator, room_name, entry_id, "learning")
-        self._attr_name = f"TRV {room_name} Learning"
+        self._attr_name = "Learning"
         self._attr_icon = "mdi:school"
 
     @property
@@ -153,7 +153,7 @@ class TrvLastCycleSensor(TrvBaseSensor):
     def __init__(self, coordinator, room_name: str, entry_id: str):
         """Inicializace last cycle senzoru."""
         super().__init__(coordinator, room_name, entry_id, "last_cycle")
-        self._attr_name = f"TRV {room_name} Last Cycle"
+        self._attr_name = "Last Cycle"
         self._attr_icon = "mdi:history"
 
     @property
@@ -203,7 +203,7 @@ class TrvHistorySensor(TrvBaseSensor):
     def __init__(self, coordinator, room_name: str, entry_id: str):
         """Inicializace history senzoru."""
         super().__init__(coordinator, room_name, entry_id, "history")
-        self._attr_name = f"TRV {room_name} History"
+        self._attr_name = "History"
         self._attr_icon = "mdi:chart-line"
 
     @property
@@ -228,7 +228,7 @@ class TrvStatsSensor(TrvBaseSensor):
     def __init__(self, coordinator, room_name: str, entry_id: str):
         """Inicializace stats senzoru."""
         super().__init__(coordinator, room_name, entry_id, "stats")
-        self._attr_name = f"TRV {room_name} Stats"
+        self._attr_name = "Stats"
         self._attr_icon = "mdi:chart-box-outline"
 
     @property
@@ -299,7 +299,7 @@ class TrvDiagnosticsSensor(TrvBaseSensor):
     def __init__(self, coordinator, room_name: str, entry_id: str):
         """Inicializace diagnostic senzoru."""
         super().__init__(coordinator, room_name, entry_id, "diagnostics")
-        self._attr_name = f"TRV {room_name} Diagnostics"
+        self._attr_name = "Diagnostics"
         self._attr_icon = "mdi:stethoscope"
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
