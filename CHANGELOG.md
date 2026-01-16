@@ -5,6 +5,19 @@ Všechny významné změny v projektu budou dokumentovány v tomto souboru.
 Formát vychází z [Keep a Changelog](https://keepachangelog.com/cs/1.0.0/),
 a projekt dodržuje [sémantické verzování](https://semver.org/lang/cs/).
 
+## [3.0.14] - 2026-01-16
+
+### Opraveno
+- 🐛 **Duplicitní názvy entit** - odstraněna duplicita názvu místnosti v entity_id
+  - Entity_id změněno z `sensor.trv_regulator_kuchyn_trv_kuchyn_diagnostics` na `sensor.trv_regulator_kuchyn_diagnostics`
+  - Odstraněn název místnosti z `_attr_name` u všech senzorů (State, Learning, Last Cycle, History, Stats, Diagnostics)
+  - HA automaticky přidá název místnosti z device name díky `has_entity_name = True`
+
+### Dokumentace
+- ✅ **Aktualizována dokumentace** - všechny reference na entity_id opraveny
+  - Změněno `sensor.trv_{room}_*` na `sensor.trv_regulator_{room}_*`
+  - Dokumentace nyní odpovídá skutečným názvům entit
+
 ## [3.0.13] - 2026-01-16
 
 ### Opraveno
