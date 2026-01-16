@@ -137,6 +137,13 @@ jobs:
 
           git commit -m "chore: bump version to ${{ steps.new.outputs.version }}"
 
+          # Smazat tag pokud už existuje (lokálně i na remote)
+          if git rev-parse "v${{ steps.new.outputs.version }}" >/dev/null 2>&1; then
+            echo "⚠️ Tag v${{ steps.new.outputs. version }} už existuje, mažu..."
+            git tag -d "v${{ steps.new.outputs.version }}"
+            git push --delete origin "v${{ steps.new.outputs.version }}" 2>/dev/null || true
+          fi
+
           git tag "v${{ steps.new.outputs.version }}"
 
           # ochrana proti race condition
