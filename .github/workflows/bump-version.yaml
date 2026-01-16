@@ -103,14 +103,15 @@ jobs:
       # --------------------------------------------------
       - name: Update CHANGELOG
         run: |
-          DATE=$(date +%Y-%m-%d)
+          DATETIME=$(date +"%Y-%m-%d %H:%M")
 
           if ! grep -q "## \[Unreleased\]" CHANGELOG.md; then
             echo "❌ CHANGELOG.md neobsahuje sekci [Unreleased]!"
             exit 1
           fi
 
-          sed -i "s/## \[Unreleased\]/## [${{ steps.new.outputs.version }}] - $DATE\n\n## [Unreleased]/" CHANGELOG.md
+          sed -i "s/## \[Unreleased\]/## [${{ steps.new.outputs.version }}] - $DATETIME\n\n## [Unreleased]/" CHANGELOG.md
+
 
       # --------------------------------------------------
       # 7) Urci prerelease logiku
