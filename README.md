@@ -249,7 +249,7 @@ Nastavení → Systém → Protokoly → Hledat "TRV"
 - Po naučení se automaticky adaptuje
 - Zkus snížit `learning_cycles_required` na 5
 
-**Další problémy?**  
+**Další problémy?**
 Otevři issue na [GitHubu](https://github.com/navratilpetr/trv_regulator/issues)
 
 
