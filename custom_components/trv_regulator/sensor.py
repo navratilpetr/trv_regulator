@@ -52,8 +52,20 @@ class TrvBaseSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._room_name = room_name
         self._sensor_type = sensor_type
+        self._entry_id = entry_id
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_{sensor_type}"
         self._attr_has_entity_name = True
+    
+    @property
+    def device_info(self):
+        """Informace o zařízení."""
+        return {
+            "identifiers": {(DOMAIN, self._entry_id)},
+            "name": f"TRV Regulator {self._room_name}",
+            "manufacturer": "Custom",
+            "model": "TRV Regulator",
+            "via_device": None,
+        }
 
 
 class TrvStateSensor(TrvBaseSensor):
@@ -423,6 +435,17 @@ class TrvSummarySensor(SensorEntity):
         self._attr_name = "TRV Regulator Summary"
         self._attr_icon = "mdi:home-thermometer-outline"
         self._attr_has_entity_name = True
+    
+    @property
+    def device_info(self):
+        """Informace o zařízení."""
+        return {
+            "identifiers": {(DOMAIN, "summary")},
+            "name": "TRV Regulator Summary",
+            "manufacturer": "Custom",
+            "model": "TRV Regulator Summary",
+            "via_device": None,
+        }
 
     @property
     def native_value(self):
