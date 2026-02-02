@@ -31,6 +31,7 @@ from .const import (
     TRV_OFFLINE_TIMEOUT,
     TARGET_DEBOUNCE_DELAY,
     TRV_COMMAND_VERIFY_DELAY,
+    TRV_TEMP_TOLERANCE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -982,8 +983,8 @@ class RoomController:
                 actual_temp = trv_state.attributes.get("temperature")
                 actual_mode = trv_state.state
                 
-                # Kontrola teploty (±1°C tolerance)
-                if actual_temp is not None and abs(actual_temp - temp) > 1:
+                # Kontrola teploty (tolerance definována v TRV_TEMP_TOLERANCE)
+                if actual_temp is not None and abs(actual_temp - temp) > TRV_TEMP_TOLERANCE:
                     _LOGGER.error(
                         f"TRV [{self._room_name}]: {entity_id} FAILED to apply temperature! "
                         f"Expected: {temp}°C, Got: {actual_temp}°C - Command likely lost due to weak signal"
@@ -1021,8 +1022,8 @@ class RoomController:
             actual_temp = trv_state.attributes.get("temperature")
             actual_mode = trv_state.state
             
-            # Kontrola nesouladu (±1°C tolerance)
-            temp_mismatch = actual_temp is not None and abs(actual_temp - expected_temp) > 1
+            # Kontrola nesouladu (tolerance definována v TRV_TEMP_TOLERANCE)
+            temp_mismatch = actual_temp is not None and abs(actual_temp - expected_temp) > TRV_TEMP_TOLERANCE
             mode_mismatch = actual_mode != expected_mode
             
             if temp_mismatch or mode_mismatch:
