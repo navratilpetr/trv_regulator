@@ -33,6 +33,7 @@ STORAGE_FILE = "trv_regulator_learned_params.json"
 SENSOR_OFFLINE_TIMEOUT = 120  # sekund (2 min)
 TRV_OFFLINE_TIMEOUT = 300  # sekund (5 min)
 TARGET_DEBOUNCE_DELAY = 15  # sekund
+TRV_COMMAND_VERIFY_DELAY = 5  # sekund - čekání na potvrzení TRV příkazu
 
 # Domain
 DOMAIN = "trv_regulator"
