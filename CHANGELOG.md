@@ -5,6 +5,28 @@ Všechny významné změny v projektu budou dokumentovány v tomto souboru.
 Formát vychází z [Keep a Changelog](https://keepachangelog.com/cs/1.0.0/),
 a projekt dodržuje [sémantické verzování](https://semver.org/lang/cs/).
 
+## [Unreleased]
+
+### Přidáno
+- 🛡️ **TRV State Verification** - Ověření stavu TRV 5s po odeslání příkazu
+  - Detekuje ztracené příkazy kvůli slabému Zigbee signálu
+  - Loguje ERROR pokud TRV neprovedla příkaz
+- 🔍 **TRV Watchdog** - Pravidelná kontrola stavu TRV každých 30s
+  - Detekuje nesoulad mezi očekávaným a skutečným stavem TRV
+  - Automaticky opravuje TRV které zůstaly v nesprávném režimu
+  - Zabraňuje přetápění při ztrátě komunikace
+
+### Opraveno
+- 🐛 **Kritická chyba: TRV zůstávají topit při slabém signálu**
+  - Opraveno: TRV se slabším signálem někdy nezareagují na příkaz OFF
+  - Systém nyní automaticky detekuje a opravuje nesoulad
+  - Přidána konstanta `TRV_COMMAND_VERIFY_DELAY = 5` sekund
+
+### Technické změny
+- Nová metoda `_verify_trv_state()` v `RoomController`
+- Rozšířená metoda `_set_all_trv()` o post-command verifikaci
+- Import `TRV_COMMAND_VERIFY_DELAY` z `const.py`
+
 ## [3.0.14] - 2026-01-16
 
 ### Opraveno

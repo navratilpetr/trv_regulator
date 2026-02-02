@@ -30,6 +30,8 @@ from .const import (
     SENSOR_OFFLINE_TIMEOUT,
     TRV_OFFLINE_TIMEOUT,
     TARGET_DEBOUNCE_DELAY,
+    TRV_COMMAND_VERIFY_DELAY,
+    TRV_TEMP_TOLERANCE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -363,7 +365,10 @@ class RoomController:
         if not await self._check_trv_availability():
             return
         
-        # 3. Načíst aktuální hodnoty
+        # 3. Watchdog - kontrola stavu TRV
+        await self._verify_trv_state()
+        
+        # 4. Načíst aktuální hodnoty
         temp = self._get_temperature()
         target = self._get_target()
         
@@ -374,18 +379,18 @@ class RoomController:
             )
             return
         
-        # 4. Debounce target změny
+        # 5. Debounce target změny
         if self._last_target_value != target:
             await self._handle_target_change(target)
             return
         
-        # 5. Zkontrolovat okna
+        # 6. Zkontrolovat okna
         window_open = self._any_window_open()
         
-        # 6. Vyhodnotit stavový automat
+        # 7. Vyhodnotit stavový automat
         new_state = await self._evaluate_state(temp, target, window_open)
         
-        # 7. Přejít do nového stavu pokud se změnil
+        # 8. Přejít do nového stavu pokud se změnil
         if new_state != self._state:
             await self._transition_to(new_state, temp, target)
         else:
@@ -932,7 +937,7 @@ class RoomController:
         return time_offset
 
     async def _set_all_trv(self, command: dict[str, Any]):
-        """Nastavit všechny TRV hlavice."""
+        """Nastavit všechny TRV hlavice s verifikací."""
         mode = command["hvac_mode"]
         temp = command["temperature"]
         
@@ -962,6 +967,86 @@ class RoomController:
                 {"entity_id": entity_id, "temperature": temp},
                 blocking=True,
             )
+        
+        # Počkat a ověřit stav
+        await asyncio.sleep(TRV_COMMAND_VERIFY_DELAY)
+        
+        # Verifikovat že všechny TRV přijaly příkaz
+        for trv_config in self._trv_entities:
+            if not trv_config.get("enabled", True):
+                continue
+            
+            entity_id = trv_config["entity"]
+            trv_state = self._hass.states.get(entity_id)
+            
+            if trv_state:
+                actual_temp = trv_state.attributes.get("temperature")
+                actual_mode = trv_state.state
+                
+                # Kontrola teploty (tolerance definována v TRV_TEMP_TOLERANCE)
+                if actual_temp is not None and abs(actual_temp - temp) > TRV_TEMP_TOLERANCE:
+                    _LOGGER.error(
+                        f"TRV [{self._room_name}]: {entity_id} FAILED to apply temperature! "
+                        f"Expected: {temp}°C, Got: {actual_temp}°C - Command likely lost due to weak signal"
+                    )
+                
+                # Kontrola režimu
+                if actual_mode != mode:
+                    _LOGGER.error(
+                        f"TRV [{self._room_name}]: {entity_id} FAILED to apply hvac_mode! "
+                        f"Expected: {mode}, Got: {actual_mode} - Command likely lost due to weak signal"
+                    )
+
+    async def _verify_trv_state(self):
+        """Pravidelná kontrola, zda TRV odpovídají očekávanému stavu."""
+        # Určit očekávaný příkaz podle aktuálního stavu
+        if self._state == STATE_HEATING:
+            expected_command = TRV_ON
+        else:
+            # IDLE, COOLDOWN, VENT, ERROR → všechny mají TRV OFF
+            expected_command = TRV_OFF
+        
+        expected_temp = expected_command["temperature"]
+        expected_mode = expected_command["hvac_mode"]
+        
+        for trv_config in self._trv_entities:
+            if not trv_config.get("enabled", True):
+                continue
+            
+            entity_id = trv_config["entity"]
+            trv_state = self._hass.states.get(entity_id)
+            
+            if not trv_state or trv_state.state in ("unavailable", "unknown"):
+                continue  # TRV offline je řešeno v _check_trv_availability
+            
+            actual_temp = trv_state.attributes.get("temperature")
+            actual_mode = trv_state.state
+            
+            # Kontrola nesouladu (tolerance definována v TRV_TEMP_TOLERANCE)
+            temp_mismatch = actual_temp is not None and abs(actual_temp - expected_temp) > TRV_TEMP_TOLERANCE
+            mode_mismatch = actual_mode != expected_mode
+            
+            if temp_mismatch or mode_mismatch:
+                _LOGGER.warning(
+                    f"TRV [{self._room_name}]: {entity_id} STATE MISMATCH detected! "
+                    f"Expected: {expected_mode}/{expected_temp}°C, "
+                    f"Actual: {actual_mode}/{actual_temp}°C - CORRECTING NOW"
+                )
+                
+                # Okamžitě opravit
+                await self._hass.services.async_call(
+                    "climate",
+                    "set_hvac_mode",
+                    {"entity_id": entity_id, "hvac_mode": expected_mode},
+                    blocking=True,
+                )
+                
+                await self._hass.services.async_call(
+                    "climate",
+                    "set_temperature",
+                    {"entity_id": entity_id, "temperature": expected_temp},
+                    blocking=True,
+                )
 
     def _get_temperature(self) -> Optional[float]:
         """Načíst aktuální teplotu."""
