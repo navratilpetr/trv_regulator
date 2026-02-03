@@ -7,6 +7,8 @@ a projekt dodržuje [sémantické verzování](https://semver.org/lang/cs/).
 
 ## [Unreleased]
 
+## [3.0.15] - 2026-02-03
+
 ### Přidáno
 - 🛡️ **TRV State Verification** - Ověření stavu TRV 5s po odeslání příkazu
   - Detekuje ztracené příkazy kvůli slabému Zigbee signálu
