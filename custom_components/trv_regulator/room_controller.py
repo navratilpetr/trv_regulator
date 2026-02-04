@@ -32,6 +32,9 @@ from .const import (
     TARGET_DEBOUNCE_DELAY,
     TRV_COMMAND_VERIFY_DELAY,
     TRV_TEMP_TOLERANCE,
+    FAILURE_REASON_TEMP_MISMATCH,
+    FAILURE_REASON_MODE_MISMATCH,
+    FAILURE_REASON_OFFLINE,
 )
 from .reliability_tracker import ReliabilityTracker
 
@@ -1000,33 +1003,49 @@ class RoomController:
             trv_state = self._hass.states.get(entity_id)
             
             if trv_state:
+                if trv_state.state == "unavailable":
+                    self._reliability_tracker.command_failed(
+                        entity_id,
+                        expected={"hvac_mode": mode, "temperature": temp},
+                        actual={"state": "unavailable"},
+                        reason=FAILURE_REASON_OFFLINE
+                    )
+                    continue
+                
                 actual_temp = trv_state.attributes.get("temperature")
                 actual_mode = trv_state.state
                 
-                # Kontrola teploty (tolerance definována v TRV_TEMP_TOLERANCE)
-                if actual_temp is not None and abs(actual_temp - temp) > TRV_TEMP_TOLERANCE:
+                # Smart verification - temperature is critical, mode is not
+                temp_ok = actual_temp is not None and abs(actual_temp - temp) <= TRV_TEMP_TOLERANCE
+                mode_ok = actual_mode == mode
+                
+                if not temp_ok:
+                    # CRITICAL ERROR - temperature mismatch!
                     _LOGGER.error(
                         f"TRV [{self._room_name}]: {entity_id} FAILED to apply temperature! "
                         f"Expected: {temp}°C, Got: {actual_temp}°C - Command likely lost due to weak signal"
                     )
-                    # Track command failure
                     self._reliability_tracker.command_failed(
                         entity_id,
                         expected={"hvac_mode": mode, "temperature": temp},
-                        actual={"hvac_mode": actual_mode, "temperature": actual_temp}
+                        actual={"hvac_mode": actual_mode, "temperature": actual_temp},
+                        reason=FAILURE_REASON_TEMP_MISMATCH
                     )
-                
-                # Kontrola režimu
-                elif actual_mode != mode:
-                    _LOGGER.error(
-                        f"TRV [{self._room_name}]: {entity_id} FAILED to apply hvac_mode! "
-                        f"Expected: {mode}, Got: {actual_mode} - Command likely lost due to weak signal"
+                elif not mode_ok:
+                    # WARNING - mode mismatch but temperature OK (TRV preference)
+                    _LOGGER.warning(
+                        f"TRV [{self._room_name}]: {entity_id} mode differs (expected: {mode}, got: {actual_mode}) "
+                        f"but temperature is correct ({actual_temp}°C) - TRV prefers {actual_mode} mode"
                     )
-                    # Track command failure
-                    self._reliability_tracker.command_failed(
+                    self._reliability_tracker.mode_mismatch(
                         entity_id,
-                        expected={"hvac_mode": mode, "temperature": temp},
-                        actual={"hvac_mode": actual_mode, "temperature": actual_temp}
+                        expected_mode=mode,
+                        actual_mode=actual_mode,
+                        temperature=actual_temp
+                    )
+                else:
+                    _LOGGER.debug(
+                        f"TRV [{self._room_name}]: {entity_id} verified OK ({actual_mode}/{actual_temp}°C)"
                     )
 
     async def _verify_trv_state(self):
@@ -1054,22 +1073,22 @@ class RoomController:
             actual_temp = trv_state.attributes.get("temperature")
             actual_mode = trv_state.state
             
-            # Kontrola nesouladu (tolerance definována v TRV_TEMP_TOLERANCE)
+            # Smart watchdog - check only temperature!
             temp_mismatch = actual_temp is not None and abs(actual_temp - expected_temp) > TRV_TEMP_TOLERANCE
-            mode_mismatch = actual_mode != expected_mode
             
-            if temp_mismatch or mode_mismatch:
+            if temp_mismatch:
+                # REAL mismatch - temperature is wrong!
                 _LOGGER.warning(
                     f"TRV [{self._room_name}]: {entity_id} STATE MISMATCH detected! "
-                    f"Expected: {expected_mode}/{expected_temp}°C, "
-                    f"Actual: {actual_mode}/{actual_temp}°C - CORRECTING NOW"
+                    f"Expected: {expected_temp}°C, Actual: {actual_temp}°C (mode: {actual_mode}) - CORRECTING NOW"
                 )
                 
                 # Track watchdog correction
                 self._reliability_tracker.watchdog_correction(
                     entity_id,
                     expected={"hvac_mode": expected_mode, "temperature": expected_temp},
-                    found={"hvac_mode": actual_mode, "temperature": actual_temp}
+                    found={"hvac_mode": actual_mode, "temperature": actual_temp},
+                    reason=FAILURE_REASON_TEMP_MISMATCH
                 )
                 
                 # Okamžitě opravit
@@ -1085,6 +1104,12 @@ class RoomController:
                     "set_temperature",
                     {"entity_id": entity_id, "temperature": expected_temp},
                     blocking=True,
+                )
+            elif actual_mode != expected_mode:
+                # Mode mismatch but temperature OK - just DEBUG log
+                _LOGGER.debug(
+                    f"TRV [{self._room_name}]: {entity_id} in {actual_mode} mode "
+                    f"(expected {expected_mode}) but temperature correct ({actual_temp}°C)"
                 )
 
     def _get_temperature(self) -> Optional[float]:

@@ -33,8 +33,8 @@ STORAGE_FILE = "trv_regulator_learned_params.json"
 SENSOR_OFFLINE_TIMEOUT = 120  # sekund (2 min)
 TRV_OFFLINE_TIMEOUT = 300  # sekund (5 min)
 TARGET_DEBOUNCE_DELAY = 15  # sekund
-TRV_COMMAND_VERIFY_DELAY = 5  # sekund - čekání na potvrzení TRV příkazu
-TRV_TEMP_TOLERANCE = 1  # °C - tolerance pro kontrolu teploty TRV
+TRV_COMMAND_VERIFY_DELAY = 15  # sekund - cekani na potvrzeni TRV prikazu
+TRV_TEMP_TOLERANCE = 1  # stupne Celsia - tolerance pro kontrolu teploty TRV
 
 # Reliability tracking
 RELIABILITY_STRONG_THRESHOLD = 98  # %
@@ -44,6 +44,11 @@ RELIABILITY_HOURLY_HISTORY = 720  # records (30 days)
 RELIABILITY_DAILY_HISTORY = 30  # days
 RELIABILITY_COMMAND_HISTORY = 100  # last N commands
 RELIABILITY_CORRECTION_HISTORY = 100  # last N corrections
+
+# Reliability tracking - failure reasons
+FAILURE_REASON_TEMP_MISMATCH = "temperature_mismatch"  # teplota nesedi (REALNE selhani)
+FAILURE_REASON_MODE_MISMATCH = "mode_mismatch"  # mode nesedi, teplota OK (TRV preference)
+FAILURE_REASON_OFFLINE = "offline"  # TRV offline/unavailable
 
 # Domain
 DOMAIN = "trv_regulator"
