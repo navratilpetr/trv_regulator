@@ -7,6 +7,21 @@ a projekt dodržuje [sémantické verzování](https://semver.org/lang/cs/).
 
 ## [Unreleased]
 
+## [3.0.19] - 2026-02-04
+
+### Opraveno
+- 🐛 **Recorder warnings pro history sensors**
+  - Omezení history sensor atributů na 20 posledních cyklů (bylo ~100)
+  - Atributy nyní ~3.6 KB (pod 16 KB limitem)
+  - **Důvod:** Atributy s 100 cykly překračovaly 16 KB limit a neukládaly se do databáze
+  - **Dopad:** V UI vidíš posledních 20 cyklů, plná historie (100) zůstává v JSON persistence
+
+### Poznámka
+- Plná historie stále dostupná v:
+  - `sensor.trv_regulator_{room}_stats` - agregované statistiky
+  - `.storage/trv_regulator_learned_params.json` - všech 100 cyklů
+  - Learning mode používá všech 100 cyklů
+
 ## [3.0.18] - 2026-02-04
 
 ### Opraveno
