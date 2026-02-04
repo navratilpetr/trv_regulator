@@ -5,9 +5,29 @@ Všechny významné změny v projektu budou dokumentovány v tomto souboru.
 Formát vychází z [Keep a Changelog](https://keepachangelog.com/cs/1.0.0/),
 a projekt dodržuje [sémantické verzování](https://semver.org/lang/cs/).
 
-## [3.0.17] - 2026-02-04 12:47
-
 ## [Unreleased]
+
+## [3.0.18] - 2026-02-04
+
+### Opraveno
+- 🐛 **Recorder warnings pro reliability sensors**
+  - Omezení `command_history` na 10 záznamů (bylo 100)
+  - Omezení `correction_history` na 10 záznamů (bylo 100)
+  - Odstranění `hourly_stats` a `daily_stats` z atributů (zůstává v JSON)
+  - **Důvod:** Atributy překračovaly 16 KB limit a neukládaly se do databáze
+- 🐛 **CHANGELOG duplicita** - verze 3.0.17 byla tam dvakrát
+  - Opraveno: Vyčištěn CHANGELOG, odstraněna duplicita
+
+### Změněno
+- ⚙️ **Vylepšen bump-version.yaml workflow**
+  - Použit awk místo sed pro bezpečnější náhradu
+  - Přidána kontrola existující verze v CHANGELOG
+  - Prevence duplicitních verzí
+
+### Přidáno
+- 📝 **CHANGELOG pravidla pro Copilot agenty**
+  - Dokumentace v `.github/COPILOT_CHANGELOG_RULES.md`
+  - Instrukce jak správně upravovat CHANGELOG
 
 ## [3.0.17] - 2026-02-04
 
