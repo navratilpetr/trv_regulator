@@ -237,9 +237,9 @@ class TrvHistorySensor(TrvBaseSensor):
         """Vrací dodatečné atributy."""
         history = self.coordinator.room.history
         
-        # Vrátit celou historii (max 100 cyklů)
+        # Omezit na 20 posledních cyklů (kvůli 16 KB Recorder limitu)
         return {
-            "cycles": history
+            "cycles": history[-20:] if len(history) > 20 else history
         }
 
 
