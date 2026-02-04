@@ -33,6 +33,7 @@ from .const import (
     TRV_COMMAND_VERIFY_DELAY,
     TRV_TEMP_TOLERANCE,
 )
+from .reliability_tracker import ReliabilityTracker
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -120,6 +121,9 @@ class RoomController:
         
         # Refresh callback (set by coordinator to avoid circular import)
         self._refresh_callback = None
+        
+        # Reliability tracking
+        self._reliability_tracker = ReliabilityTracker(room_name)
 
         _LOGGER.info(
             f"TRV [{self._room_name}] initialized (ON/OFF mode): "
@@ -245,6 +249,18 @@ class RoomController:
                     maxlen=self._learning_cycles_required
                 )
                 
+                # Load reliability metrics
+                if "reliability_metrics" in room_data:
+                    self._reliability_tracker = ReliabilityTracker.from_dict(
+                        self._room_name,
+                        room_data["reliability_metrics"]
+                    )
+                    _LOGGER.info(
+                        f"TRV [{self._room_name}]: Loaded reliability metrics: "
+                        f"commands_sent={self._reliability_tracker._commands_sent_total}, "
+                        f"commands_failed={self._reliability_tracker._commands_failed_total}"
+                    )
+                
                 _LOGGER.info(
                     f"TRV [{self._room_name}]: Loaded learned params: "
                     f"avg_duration={self._avg_heating_duration}s, "
@@ -338,6 +354,7 @@ class RoomController:
             "history": self._history[-HISTORY_SIZE:],
             "performance_history": list(self._performance_history),
             "monthly_stats": self._monthly_stats,
+            "reliability_metrics": self._reliability_tracker.to_dict(),
         }
         
         # Zajistit existenci adresáře
@@ -954,6 +971,9 @@ class RoomController:
             
             entity_id = trv_config["entity"]
             
+            # Track command sent
+            self._reliability_tracker.command_sent(entity_id)
+            
             await self._hass.services.async_call(
                 "climate",
                 "set_hvac_mode",
@@ -989,12 +1009,24 @@ class RoomController:
                         f"TRV [{self._room_name}]: {entity_id} FAILED to apply temperature! "
                         f"Expected: {temp}°C, Got: {actual_temp}°C - Command likely lost due to weak signal"
                     )
+                    # Track command failure
+                    self._reliability_tracker.command_failed(
+                        entity_id,
+                        expected={"hvac_mode": mode, "temperature": temp},
+                        actual={"hvac_mode": actual_mode, "temperature": actual_temp}
+                    )
                 
                 # Kontrola režimu
-                if actual_mode != mode:
+                elif actual_mode != mode:
                     _LOGGER.error(
                         f"TRV [{self._room_name}]: {entity_id} FAILED to apply hvac_mode! "
                         f"Expected: {mode}, Got: {actual_mode} - Command likely lost due to weak signal"
+                    )
+                    # Track command failure
+                    self._reliability_tracker.command_failed(
+                        entity_id,
+                        expected={"hvac_mode": mode, "temperature": temp},
+                        actual={"hvac_mode": actual_mode, "temperature": actual_temp}
                     )
 
     async def _verify_trv_state(self):
@@ -1031,6 +1063,13 @@ class RoomController:
                     f"TRV [{self._room_name}]: {entity_id} STATE MISMATCH detected! "
                     f"Expected: {expected_mode}/{expected_temp}°C, "
                     f"Actual: {actual_mode}/{actual_temp}°C - CORRECTING NOW"
+                )
+                
+                # Track watchdog correction
+                self._reliability_tracker.watchdog_correction(
+                    entity_id,
+                    expected={"hvac_mode": expected_mode, "temperature": expected_temp},
+                    found={"hvac_mode": actual_mode, "temperature": actual_temp}
                 )
                 
                 # Okamžitě opravit

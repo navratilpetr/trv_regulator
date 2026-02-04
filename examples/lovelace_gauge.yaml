@@ -1,0 +1,11 @@
+type: gauge
+entity: sensor.trv_regulator_loznice_reliability
+attribute: reliability_rate
+name: TRV Signal Quality
+min: 0
+max: 100
+needle: true
+severity:
+  green: 98
+  yellow: 90
+  red: 0

@@ -1,0 +1,36 @@
+type: vertical-stack
+cards:
+  - type: gauge
+    entity: sensor.trv_regulator_loznice_reliability
+    attribute: reliability_rate
+    name: Overall Signal
+    min: 0
+    max: 100
+    severity:
+      green: 98
+      yellow: 90
+      red: 0
+      
+  - type: glance
+    title: Individual TRVs
+    entities:
+      - entity: sensor.trv_loznice_1_reliability
+        name: TRV 1
+      - entity: sensor.trv_loznice_2_reliability
+        name: TRV 2
+        
+  - type: entities
+    title: Detailed Metrics
+    entities:
+      - type: attribute
+        entity: sensor.trv_regulator_loznice_reliability
+        attribute: failed_commands_24h
+        name: Failed Commands (24h)
+      - type: attribute
+        entity: sensor.trv_regulator_loznice_reliability
+        attribute: watchdog_corrections_24h
+        name: Auto-Corrections (24h)
+      - type: attribute
+        entity: sensor.trv_regulator_loznice_reliability
+        attribute: signal_trend
+        name: Trend (7d)

@@ -10,6 +10,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.entity import EntityCategory
 
 from .const import DOMAIN
+from .reliability_sensors import TrvIndividualReliabilitySensor
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,7 +31,27 @@ async def async_setup_entry(
         TrvHistorySensor(coordinator, room_name, entry.entry_id),
         TrvStatsSensor(coordinator, room_name, entry.entry_id),
         TrvDiagnosticsSensor(coordinator, room_name, entry.entry_id),
+        TrvReliabilitySensor(coordinator, room_name, entry.entry_id),
     ]
+    
+    # Add per-TRV reliability sensors
+    trv_entities = entry.data.get("trv_entities", [])
+    for trv_config in trv_entities:
+        # Handle both dict and string formats
+        if isinstance(trv_config, dict):
+            entity_id = trv_config.get("entity")
+        else:
+            entity_id = trv_config
+        
+        if entity_id:
+            sensors.append(
+                TrvIndividualReliabilitySensor(
+                    coordinator,
+                    room_name,
+                    entity_id,
+                    entry.entry_id
+                )
+            )
     
     async_add_entities(sensors)
     
@@ -495,3 +516,42 @@ class TrvSummarySensor(SensorEntity):
     async def async_update(self):
         """Update je handled automaticky přes coordinatory."""
         pass
+
+
+class TrvReliabilitySensor(TrvBaseSensor):
+    """Aggregate room reliability sensor."""
+
+    def __init__(self, coordinator, room_name: str, entry_id: str):
+        """Initialize reliability sensor."""
+        super().__init__(coordinator, room_name, entry_id, "reliability")
+        self._attr_name = "Reliability"
+        self._attr_icon = "mdi:signal-variant"
+
+    @property
+    def native_value(self):
+        """Return signal quality (weak/medium/strong)."""
+        try:
+            metrics = self.coordinator.room._reliability_tracker.get_metrics()
+            return metrics.get("signal_quality", "unknown")
+        except Exception as e:
+            _LOGGER.error(
+                f"TRV [{self._room_name}]: Error getting reliability: {e}"
+            )
+            return "unknown"
+
+    @property
+    def extra_state_attributes(self):
+        """Return all reliability metrics."""
+        try:
+            return self.coordinator.room._reliability_tracker.get_metrics()
+        except Exception as e:
+            _LOGGER.error(
+                f"TRV [{self._room_name}]: Error getting reliability metrics: {e}"
+            )
+            return {}
+
+    @property
+    def state_class(self):
+        """Return state class."""
+        return None  # Qualitative value
+
