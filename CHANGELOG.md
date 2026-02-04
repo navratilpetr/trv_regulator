@@ -5,9 +5,46 @@ Všechny významné změny v projektu budou dokumentovány v tomto souboru.
 Formát vychází z [Keep a Changelog](https://keepachangelog.com/cs/1.0.0/),
 a projekt dodržuje [sémantické verzování](https://semver.org/lang/cs/).
 
-## [3.0.16] - 2026-02-04 08:33
-
 ## [Unreleased]
+
+## [3.0.16] - 2026-02-04
+
+### Přidáno
+- 📊 **TRV Reliability Tracking** - Komprehenzivní sledování spolehlivosti TRV komunikace
+  - Multi-window statistiky (1h / 24h / 7d / 30d)
+  - Per-TRV reliability sensory pro každou hlavici
+  - Aggregate reliability sensor pro celou místnost
+  - Automatická detekce slabého Zigbee signálu
+  - Signal quality classification (strong ≥98%, medium ≥90%, weak <90%)
+  - Trend analysis (improving / stable / deteriorating)
+  - Command history (100 posledních příkazů)
+  - Correction history (100 posledních watchdog oprav)
+  - Hourly statistics (720 záznamů = 30 dní)
+  - Daily statistics (30 dní historie)
+
+### Sensory
+- `sensor.trv_regulator_{room}_reliability` - aggregate reliability sensor
+  - State: weak / medium / strong
+  - Atributy: reliability_rate, failed_commands_24h, watchdog_corrections_24h, signal_trend, trv_statistics
+- `sensor.trv_regulator_{room}_trv_{N}_reliability` - per-TRV reliability sensor
+  - Individuální metriky pro každou TRV hlavici
+  - Success rate, signal quality, commands sent/failed
+
+### UI Vizualizace
+- Ready-to-use Lovelace konfigurace v `examples/` folderu
+  - `lovelace_gauge.yaml` - vizuální gauge indikátor
+  - `lovelace_complete.yaml` - kompletní dashboard
+  - `lovelace_apexcharts.yaml` - trend grafy (vyžaduje HACS ApexCharts Card)
+
+### Technické změny
+- Nový soubor `reliability_tracker.py` - hlavní tracking logika
+- Nový soubor `reliability_sensors.py` - per-TRV sensory
+- Rozšířen `room_controller.py` o reliability tracking hooks
+- Rozšířen `sensor.py` o aggregate reliability sensor
+- Rozšířen `const.py` o reliability thresholdy a konstanty
+- Rozšíření JSON storage o `reliability_metrics`
+- Full events persistence (30 dní history)
+- Automatický cleanup starých událostí
 
 ## [3.0.15] - 2026-02-03
 
