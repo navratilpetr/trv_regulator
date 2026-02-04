@@ -5,6 +5,8 @@ Všechny významné změny v projektu budou dokumentovány v tomto souboru.
 Formát vychází z [Keep a Changelog](https://keepachangelog.com/cs/1.0.0/),
 a projekt dodržuje [sémantické verzování](https://semver.org/lang/cs/).
 
+## [3.0.17] - 2026-02-04 12:47
+
 ## [Unreleased]
 
 ## [3.0.17] - 2026-02-04
