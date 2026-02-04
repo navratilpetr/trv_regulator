@@ -33,6 +33,7 @@ from .const import (
     TRV_COMMAND_VERIFY_DELAY,
     TRV_TEMP_TOLERANCE,
 )
+from .reliability_tracker import ReliabilityTracker
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -122,7 +123,6 @@ class RoomController:
         self._refresh_callback = None
         
         # Reliability tracking
-        from .reliability_tracker import ReliabilityTracker
         self._reliability_tracker = ReliabilityTracker(room_name)
 
         _LOGGER.info(
@@ -251,7 +251,6 @@ class RoomController:
                 
                 # Load reliability metrics
                 if "reliability_metrics" in room_data:
-                    from .reliability_tracker import ReliabilityTracker
                     self._reliability_tracker = ReliabilityTracker.from_dict(
                         self._room_name,
                         room_data["reliability_metrics"]
