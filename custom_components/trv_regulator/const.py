@@ -36,5 +36,14 @@ TARGET_DEBOUNCE_DELAY = 15  # sekund
 TRV_COMMAND_VERIFY_DELAY = 5  # sekund - čekání na potvrzení TRV příkazu
 TRV_TEMP_TOLERANCE = 1  # °C - tolerance pro kontrolu teploty TRV
 
+# Reliability tracking
+RELIABILITY_STRONG_THRESHOLD = 98  # %
+RELIABILITY_MEDIUM_THRESHOLD = 90  # %
+RELIABILITY_TREND_WINDOW = 7  # days for trend analysis
+RELIABILITY_HOURLY_HISTORY = 720  # records (30 days)
+RELIABILITY_DAILY_HISTORY = 30  # days
+RELIABILITY_COMMAND_HISTORY = 100  # last N commands
+RELIABILITY_CORRECTION_HISTORY = 100  # last N corrections
+
 # Domain
 DOMAIN = "trv_regulator"

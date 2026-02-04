@@ -114,9 +114,75 @@ Pro každou místnost:
 - **`sensor.trv_regulator_{room}_history`** - Historie posledních 100 cyklů
 - **`sensor.trv_regulator_{room}_stats`** - Statistiky (průměry, úspěšnost)
 - **`sensor.trv_regulator_{room}_diagnostics`** - Stav komponent (diagnostic entity)
+- **`sensor.trv_regulator_{room}_reliability`** - Spolehlivost komunikace s TRV
+- **`sensor.{trv_name}_reliability`** - Individuální spolehlivost pro každou TRV
 
 Pro celou integraci:
 - **`sensor.trv_regulator_summary`** - Přehled všech místností
+
+## 📊 Reliability Tracking
+
+TRV Regulator automaticky sleduje spolehlivost komunikace s TRV hlavicemi a pomáhá identifikovat problémy se slabým Zigbee signálem.
+
+### Sensory
+
+#### Aggregate Reliability Sensor
+`sensor.trv_regulator_{room}_reliability`
+
+**State:** `weak` / `medium` / `strong` / `unknown`
+
+**Atributy:**
+- `reliability_rate`: % úspěšných příkazů (0-100)
+- `signal_quality`: weak / medium / strong
+- `failed_commands_24h`: Počet selhání za 24h
+- `watchdog_corrections_24h`: Počet automatických oprav za 24h
+- `signal_trend`: improving / stable / deteriorating
+- `trv_statistics`: Per-TRV detaily (commands sent/failed, success rate, atd.)
+- `hourly_stats`: Hodinové statistiky (720 záznamů = 30 dní)
+- `daily_stats`: Denní statistiky (30 dní)
+- `command_history`: Historie posledních 100 příkazů
+- `correction_history`: Historie posledních 100 oprav
+
+#### Per-TRV Reliability Sensors
+`sensor.{trv_name}_reliability`
+
+Separátní sensor pro každou TRV hlavici s individuálními metrikami:
+- `commands_sent`: Počet odeslaných příkazů
+- `commands_failed`: Počet selhání
+- `success_rate`: % úspěšnost
+- `signal_quality`: weak / medium / strong
+- `last_seen`: Čas posledního příkazu
+
+### Signal Quality Thresholdy
+
+- **Strong (≥98%)**: Vynikající signál, žádná akce potřeba
+- **Medium (90-98%)**: Přijatelné, občasná selhání, zvážit přidání Zigbee routeru
+- **Weak (<90%)**: Slabý signál, časté problémy - přidat Zigbee router!
+
+### UI Vizualizace
+
+Viz složka `examples/` pro ready-to-use Lovelace konfigurace:
+- `lovelace_gauge.yaml` - Vizuální gauge indikátor
+- `lovelace_complete.yaml` - Kompletní dashboard s detaily
+- `lovelace_apexcharts.yaml` - Trend grafy (vyžaduje ApexCharts Card z HACS)
+
+### Troubleshooting
+
+**Slabý signál (weak):**
+1. Zkontroluj `trv_statistics` - která konkrétní TRV má problém
+2. Přidej Zigbee router poblíž problémové TRV
+3. Sleduj `signal_trend` - měl by se změnit na "improving"
+
+**Vysoký počet watchdog corrections:**
+- Indikuje že TRV často zůstává v nesprávném stavu
+- Obvykle způsobeno slabým Zigbee signálem
+- Watchdog automaticky opravuje, ale měl bys zlepšit signál přidáním routeru
+
+**Deteriorating trend:**
+- Zkontroluj nové zdroje interference
+- Ověř zdraví Zigbee sítě
+- Zkontroluj baterie v TRV
+- Zvaž přemístění Zigbee routerů
 
 ## ⚙️ Rychlost reakce
 

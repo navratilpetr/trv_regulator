@@ -1,0 +1,13 @@
+# Requires: HACS → ApexCharts Card
+type: custom:apexcharts-card
+header:
+  title: TRV Reliability Trend (7 days)
+  show: true
+graph_span: 7d
+series:
+  - entity: sensor.trv_regulator_loznice_reliability
+    attribute: reliability_rate
+    name: Success Rate
+    type: line
+    stroke_width: 2
+    color: '#00ff00'
