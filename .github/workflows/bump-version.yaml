@@ -104,14 +104,36 @@ jobs:
       - name: Update CHANGELOG
         run: |
           DATETIME=$(date +"%Y-%m-%d %H:%M")
+          VERSION="${{ steps.new.outputs.version }}"
 
+          # Kontrola, že existuje [Unreleased]
           if ! grep -q "## \[Unreleased\]" CHANGELOG.md; then
             echo "❌ CHANGELOG.md neobsahuje sekci [Unreleased]!"
             exit 1
           fi
 
-          sed -i "s/## \[Unreleased\]/## [${{ steps.new.outputs.version }}] - $DATETIME\n\n## [Unreleased]/" CHANGELOG.md
+          # Kontrola, že verze UŽ TAM NENÍ
+          if grep -q "## \[$VERSION\]" CHANGELOG.md; then
+            echo "⚠️ Verze [$VERSION] již v CHANGELOG.md existuje!"
+            echo "Přeskakuji update CHANGELOG (pravděpodobně duplicitní run)."
+            # Neexituj s chybou, jen přeskoč
+          else
+            # Bezpečná náhrada - jen PRVNÍ výskyt na ZAČÁTKU řádku
+            # Použij awk místo sed pro větší kontrolu
+            awk -v ver="$VERSION" -v dt="$DATETIME" '
+              !done && /^## \[Unreleased\]/ {
+                print "## [Unreleased]"
+                print ""
+                print "## [" ver "] - " dt
+                done=1
+                next
+              }
+              { print }
+            ' CHANGELOG.md > CHANGELOG.tmp
 
+            mv CHANGELOG.tmp CHANGELOG.md
+            echo "✅ CHANGELOG aktualizován: [Unreleased] → [$VERSION]"
+          fi
 
       # --------------------------------------------------
       # 7) Urci prerelease logiku

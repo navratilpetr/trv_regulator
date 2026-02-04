@@ -39,8 +39,8 @@ class ReliabilityTracker:
         self._daily_stats = deque(maxlen=30)
         
         # History
-        self._command_history = deque(maxlen=100)
-        self._correction_history = deque(maxlen=100)
+        self._command_history = deque(maxlen=10)
+        self._correction_history = deque(maxlen=10)
 
     def command_sent(self, entity_id: str):
         """Track command sent to TRV."""
@@ -374,16 +374,15 @@ class ReliabilityTracker:
             "commands_sent_7d": sent_7d,
             "commands_sent_30d": sent_30d,
             
-            # Aggregated statistics
-            "hourly_stats": list(self._hourly_stats),
-            "daily_stats": list(self._daily_stats),
-            
-            # History
+            # History (limited to 10 to stay under 16KB HA state attribute limit)
             "command_history": list(self._command_history),
             "correction_history": list(self._correction_history),
             
             # Per-TRV statistics
             "trv_statistics": trv_statistics,
+            
+            # Note: hourly_stats and daily_stats are kept in JSON persistence
+            # but removed from state attributes to reduce size
         }
 
     def to_dict(self) -> dict:
@@ -450,7 +449,7 @@ class ReliabilityTracker:
         tracker._daily_stats = deque(data.get("daily_stats", []), maxlen=30)
         
         # Restore history
-        tracker._command_history = deque(data.get("command_history", []), maxlen=100)
-        tracker._correction_history = deque(data.get("correction_history", []), maxlen=100)
+        tracker._command_history = deque(data.get("command_history", []), maxlen=10)
+        tracker._correction_history = deque(data.get("correction_history", []), maxlen=10)
         
         return tracker
