@@ -7,6 +7,45 @@ a projekt dodržuje [sémantické verzování](https://semver.org/lang/cs/).
 
 ## [Unreleased]
 
+## [3.0.17] - 2026-02-04
+
+### Opraveno
+- 🐛 **False positive failures kvůli mode changes**
+  - Opraveno: TRV které preferují `auto` mode místo `heat` již nejsou považovány za selhání
+  - Watchdog nyní kontroluje pouze teplotu, ne hvac_mode
+  - Přidána detekce preferovaného mode pro každou TRV
+  - Mode mismatches jsou sledovány separátně (ne jako failures)
+  - Failure rate nyní odráží jen REÁLNÉ problémy (ztracené příkazy, offline TRV)
+  - **Důvod:** TRV hlavice typu `climate.hlavice_loznice` automaticky přepínají z `heat` na `auto` mode, i když teplota je správně nastavena
+
+### Změněno
+- ⚙️ **TRV_COMMAND_VERIFY_DELAY zvýšeno z 5s na 15s**
+  - Větší jistota že TRV stihla přijmout a zpracovat příkaz
+  - Méně false positives při přechodném výpadku Zigbee komunikace
+  - Vhodné pro TRV se slabším signálem
+
+### Přidáno
+- 📊 **Smart mode detection** - automatická detekce preferovaného hvac_mode každé TRV
+  - Nová metrika `mode_mismatches_total` - počet mode změn (ne failures!)
+  - Per-TRV atribut `preferred_mode` - detekovaný preferovaný mode (auto/heat/off)
+  - Per-TRV atribut `mode_mismatches` - kolikrát TRV změnila mode
+
+### Technické změny
+- Rozšířen `const.py`:
+  - `TRV_COMMAND_VERIFY_DELAY = 15` sekund (zvýšeno z 5s)
+  - `FAILURE_REASON_TEMP_MISMATCH` - teplota nesedí (REÁLNÉ selhání)
+  - `FAILURE_REASON_MODE_MISMATCH` - mode nesedí, teplota OK (TRV preference)
+  - `FAILURE_REASON_OFFLINE` - TRV offline/unavailable
+  - České komentáře bez diakritiky (encoding compatibility)
+- Upravena metoda `_set_all_trv()` v `room_controller.py`:
+  - Tolerantní verifikace - kontroluje teplotu, ne mode
+  - Volá `mode_mismatch()` místo `command_failed()` pro mode changes
+- Upravena metoda `_verify_trv_state()` v `room_controller.py`:
+  - Watchdog opravuje jen temperature mismatches
+  - Mode mismatches pouze loguje (DEBUG level)
+- Nová metoda `mode_mismatch()` v `reliability_tracker.py`
+- Rozšířena persistence o `mode_mismatches_total`, `per_trv_mode_mismatches`, `per_trv_preferred_mode`
+
 ## [3.0.16] - 2026-02-04
 
 ### Přidáno

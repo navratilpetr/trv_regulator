@@ -18,11 +18,14 @@ class ReliabilityTracker:
         self._commands_sent_total = 0
         self._commands_failed_total = 0
         self._watchdog_corrections_total = 0
+        self._mode_mismatches_total = 0  # NEW!
         
         # Per-TRV tracking
         self._per_trv_sent = defaultdict(int)
         self._per_trv_failed = defaultdict(int)
         self._per_trv_last_seen = {}
+        self._per_trv_mode_mismatches = defaultdict(int)  # NEW!
+        self._per_trv_preferred_mode = {}  # NEW!
         
         # Multi-window event queues with timestamps
         # Events format: {"type": "sent|failed|correction", "entity_id": str, "timestamp": float, ...}
@@ -59,35 +62,38 @@ class ReliabilityTracker:
         self._events_7d.append(event)
         self._events_30d.append(event)
 
-    def command_failed(self, entity_id: str, expected: dict, actual: dict):
-        """Track failed command."""
+    def command_failed(self, entity_id: str, expected: dict, actual: dict, reason: Optional[str] = None):
+        """Track failed command - only REAL failures!"""
         now = datetime.now()
         timestamp = now.timestamp()
         
-        self._commands_failed_total += 1
-        self._per_trv_failed[entity_id] += 1
+        # COUNT only REAL failures (temp mismatch or offline)
+        if reason in ["temperature_mismatch", "offline"]:
+            self._commands_failed_total += 1
+            self._per_trv_failed[entity_id] += 1
+            
+            # Add event to all windows
+            event = {
+                "type": "failed",
+                "entity_id": entity_id,
+                "timestamp": timestamp,
+            }
+            self._events_1h.append(event)
+            self._events_24h.append(event)
+            self._events_7d.append(event)
+            self._events_30d.append(event)
         
-        # Add event to all windows
-        event = {
-            "type": "failed",
-            "entity_id": entity_id,
-            "timestamp": timestamp,
-        }
-        self._events_1h.append(event)
-        self._events_24h.append(event)
-        self._events_7d.append(event)
-        self._events_30d.append(event)
-        
-        # Add to command history
+        # Add to command history (all types)
         self._command_history.append({
             "timestamp": now.isoformat(),
             "trv_entity": entity_id,
             "command": expected,
             "success": False,
             "actual_state": actual,
+            "reason": reason,
         })
 
-    def watchdog_correction(self, entity_id: str, expected: dict, found: dict):
+    def watchdog_correction(self, entity_id: str, expected: dict, found: dict, reason: Optional[str] = None):
         """Track watchdog correction."""
         now = datetime.now()
         timestamp = now.timestamp()
@@ -112,6 +118,34 @@ class ReliabilityTracker:
             "expected": expected,
             "found": found,
             "corrected": True,
+            "reason": reason,
+        })
+
+    def mode_mismatch(self, entity_id: str, expected_mode: str, actual_mode: str, temperature: float):
+        """Track mode mismatch (TRV preference) - NOT counted as failure!"""
+        now = datetime.now()
+        
+        self._mode_mismatches_total += 1
+        self._per_trv_mode_mismatches[entity_id] += 1
+        
+        # Update preferred mode detection
+        self._per_trv_preferred_mode[entity_id] = actual_mode
+        
+        _LOGGER.debug(
+            f"Reliability [{self._room_name}]: Mode mismatch for {entity_id} "
+            f"(expected: {expected_mode}, got: {actual_mode}, temp: {temperature}°C) - "
+            f"TRV prefers {actual_mode}"
+        )
+        
+        # Add to command history (marked as SUCCESS because temp is OK!)
+        self._command_history.append({
+            "timestamp": now.isoformat(),
+            "trv_entity": entity_id,
+            "command": {"hvac_mode": expected_mode, "temperature": temperature},
+            "success": True,  # Temperature OK = success!
+            "actual_state": {"hvac_mode": actual_mode, "temperature": temperature},
+            "reason": "mode_mismatch",
+            "note": f"TRV prefers {actual_mode} mode",
         })
 
     def _cleanup_old_events(self):
@@ -300,13 +334,17 @@ class ReliabilityTracker:
         for entity_id in set(list(self._per_trv_sent.keys()) + list(self._per_trv_failed.keys())):
             sent = self._per_trv_sent.get(entity_id, 0)
             failed = self._per_trv_failed.get(entity_id, 0)
+            mode_mismatches = self._per_trv_mode_mismatches.get(entity_id, 0)
+            preferred_mode = self._per_trv_preferred_mode.get(entity_id, "unknown")
             quality, rate = self._calculate_signal_quality(sent, failed)
             
             trv_statistics[entity_id] = {
                 "commands_sent": sent,
                 "commands_failed": failed,
+                "mode_mismatches": mode_mismatches,  # NEW!
                 "success_rate": round(rate, 1),
                 "signal_quality": quality,
+                "preferred_mode": preferred_mode,  # NEW!
                 "last_seen": self._per_trv_last_seen.get(entity_id),
             }
         
@@ -315,6 +353,7 @@ class ReliabilityTracker:
             "commands_sent_total": self._commands_sent_total,
             "commands_failed_total": self._commands_failed_total,
             "watchdog_corrections_total": self._watchdog_corrections_total,
+            "mode_mismatches_total": self._mode_mismatches_total,  # NEW!
             "reliability_rate": round(reliability_rate, 1),
             "signal_quality": signal_quality,
             "signal_trend": signal_trend,
@@ -353,10 +392,13 @@ class ReliabilityTracker:
             "commands_sent_total": self._commands_sent_total,
             "commands_failed_total": self._commands_failed_total,
             "watchdog_corrections_total": self._watchdog_corrections_total,
+            "mode_mismatches_total": self._mode_mismatches_total,  # NEW!
             
             "per_trv_sent": dict(self._per_trv_sent),
             "per_trv_failed": dict(self._per_trv_failed),
             "per_trv_last_seen": dict(self._per_trv_last_seen),
+            "per_trv_mode_mismatches": dict(self._per_trv_mode_mismatches),  # NEW!
+            "per_trv_preferred_mode": dict(self._per_trv_preferred_mode),  # NEW!
             
             "events_30d": list(self._events_30d),
             
@@ -376,11 +418,14 @@ class ReliabilityTracker:
         tracker._commands_sent_total = data.get("commands_sent_total", 0)
         tracker._commands_failed_total = data.get("commands_failed_total", 0)
         tracker._watchdog_corrections_total = data.get("watchdog_corrections_total", 0)
+        tracker._mode_mismatches_total = data.get("mode_mismatches_total", 0)  # NEW!
         
         # Restore per-TRV tracking
         tracker._per_trv_sent = defaultdict(int, data.get("per_trv_sent", {}))
         tracker._per_trv_failed = defaultdict(int, data.get("per_trv_failed", {}))
         tracker._per_trv_last_seen = data.get("per_trv_last_seen", {})
+        tracker._per_trv_mode_mismatches = defaultdict(int, data.get("per_trv_mode_mismatches", {}))  # NEW!
+        tracker._per_trv_preferred_mode = dict(data.get("per_trv_preferred_mode", {}))  # NEW!
         
         # Restore events from 30d window and populate other windows
         events_30d = data.get("events_30d", [])
