@@ -329,6 +329,33 @@ IDLE → HEATING (s _post_vent_mode = True)
 → tento cyklus je označen jako nevalidní (nepoužije se pro učení)
 ```
 
+#### RECOVERY režim (velký teplotní rozdíl)
+
+**Kdy se aktivuje:**
+- Při přechodu do HEATING, pokud `|target - current| > recovery_threshold` (výchozí 1.0°C)
+
+**Chování:**
+```
+IDLE → HEATING (s recovery_mode = True)
+→ ignoruje naučený čas
+→ topí až do dosažení targetu (jako POST-VENT)
+→ po ukončení: recovery_mode = False, návrat do LEARNED
+→ tento cyklus JE validní (používá se pro učení)
+```
+
+**Rozdíl oproti POST-VENT:**
+- **POST-VENT:** Cyklus je **nevalidní** (po větrání je situace nestandardní)
+- **RECOVERY:** Cyklus je **validní** (normální topení, jen delší kvůli velkému ΔT)
+
+**Use case:**
+- Selhání TRV hlavice → velký pokles teploty
+- Dlouhá absence → teplota klesla
+- Po vypnutí topení přes noc
+
+**Konfigurovatelné:**
+- `recovery_threshold`: 0.5 - 3.0°C (výchozí 1.0°C)
+- Settings → Integrace → TRV Regulator → Options
+
 ---
 
 ### Učící algoritmus
