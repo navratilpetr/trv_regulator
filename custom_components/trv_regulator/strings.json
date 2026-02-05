@@ -17,6 +17,10 @@
           "trv_entities": "TRV hlavice (climate)"
         }
       },
+      "last_seen": {
+        "title": "Nastavení Last Seen sensorů (volitelné)",
+        "description": "Pro každou TRV hlavici můžete volitelně přiřadit last_seen sensor. Tento sensor se používá k detekci vybité baterie nebo slabého Zigbee signálu.\n\nNázev sensoru obvykle: `sensor.{název_trv}_last_seen`\n\nPokud sensor neexistuje nebo ho nechcete použít, nechte pole prázdné."
+      },
       "optional": {
         "title": "Volitelné nastavení",
         "description": "Volitelné entity a parametry učení",
@@ -44,7 +48,7 @@
     "step": {
       "init": {
         "title": "Upravit nastavení",
-        "description": "Změňte parametry bez odebrání integrace",
+        "description": "Změňte parametry bez odebrání integrace. Můžete upravit aktivní TRV hlavice a přiřadit last_seen sensory pro detekci vybité baterie/slabého signálu.",
         "data": {
           "enabled_trv_entities": "Aktivní TRV hlavice",
           "window_entities": "Okna (binary_sensor)",
