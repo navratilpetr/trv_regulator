@@ -7,6 +7,8 @@ a projekt dodržuje [sémantické verzování](https://semver.org/lang/cs/).
 
 ## [Unreleased]
 
+## [3.0.24] - 2026-02-05 18:50
+
 ## [3.0.23] - 2026-02-05 17:36
 
 ## [3.0.22] - 2026-02-05 12:55
