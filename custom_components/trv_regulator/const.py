@@ -54,5 +54,8 @@ FAILURE_REASON_NO_RESPONSE = "no_response"  # last_seen se nezmenil (baterie/sig
 # Rate limiting
 ERROR_LOG_RATE_LIMIT = 1800  # 30 minut v sekundach - max frekvence ERROR logu
 
+# Recovery mode
+DEFAULT_RECOVERY_THRESHOLD = 1.0  # °C - aktivace RECOVERY mode při velkém teplotním rozdílu
+
 # Domain
 DOMAIN = "trv_regulator"

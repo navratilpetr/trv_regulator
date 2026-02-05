@@ -15,6 +15,7 @@ from .const import (
     DEFAULT_MAX_HEATING_DURATION,
     DEFAULT_MAX_VALID_OVERSHOOT,
     DEFAULT_COOLDOWN_DURATION,
+    DEFAULT_RECOVERY_THRESHOLD,
 )
 
 
@@ -176,6 +177,9 @@ class TrvRegulatorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Optional(
                         "cooldown_duration", default=DEFAULT_COOLDOWN_DURATION
                     ): vol.All(vol.Coerce(int), vol.Range(min=600, max=1800)),
+                    vol.Optional(
+                        "recovery_threshold", default=DEFAULT_RECOVERY_THRESHOLD
+                    ): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=3.0)),
                 }
             ),
         )
@@ -350,6 +354,10 @@ class TrvRegulatorOptionsFlow(config_entries.OptionsFlow):
                 "cooldown_duration",
                 default=current_options.get("cooldown_duration", current_data.get("cooldown_duration", DEFAULT_COOLDOWN_DURATION))
             ): vol.All(vol.Coerce(int), vol.Range(min=600, max=1800)),
+            vol.Optional(
+                "recovery_threshold",
+                default=current_options.get("recovery_threshold", current_data.get("recovery_threshold", DEFAULT_RECOVERY_THRESHOLD))
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=3.0)),
         })
 
         return self.async_show_form(

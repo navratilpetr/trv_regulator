@@ -22,6 +22,12 @@ Custom integrace pro Home Assistant - **ON/OFF řízení s adaptivním učením*
   - První topný cyklus po větrání ignoruje naučený čas a topí až do dosažení cílové teploty
   - Řeší problém nedotopení po větším poklesu teploty během větrání
   
+- 🔥 **RECOVERY režim** - Rychlé dotopení při velkém poklesu teploty
+  - Automaticky detekuje velký teplotní rozdíl (>1°C)
+  - Topí až do dosažení cíle místo použití naučeného času
+  - Řeší rychlé dotopení po selhání hlavice nebo dlouhé absenci
+  - Na rozdíl od POST-VENT je cyklus validní pro učení
+  
 - 🎛️ **Výběr aktivních TRV hlavic**
   - V místnostech s více TRV hlavicemi lze jednotlivé hlavice vypnout přes UI
   - Nastavení → Integrace → TRV Regulator → Možnosti
@@ -84,6 +90,28 @@ Custom integrace pro Home Assistant - **ON/OFF řízení s adaptivním učením*
 | Max. doba topení | 900-10800s | 7200s | Maximální validní čas |
 | Max. validní překmit | 1.0-5.0°C | 3.0°C | Limit pro validaci |
 | Doba cooldown | 600-1800s | 1200s | Jak dlouho měřit překmit |
+| Recovery threshold | 0.5-3.0°C | 1.0°C | Aktivace RECOVERY režimu |
+
+### RECOVERY režim
+
+Když teplota klesne o více než `recovery_threshold` (výchozí 1.0°C), systém automaticky přepne do RECOVERY režimu:
+
+**Scénář:**
+```
+Teplota klesla z 22°C na 20°C (např. selhání hlavice)
+↓
+Rozdíl 2°C > threshold 1.0°C → RECOVERY mode
+↓
+Topí až do dosažení 22°C (ignoruje naučený čas)
+↓
+Cíl dosažen → návrat do normálního LEARNED režimu
+```
+
+**Výhody:**
+- ✅ Rychlé dotopení po selhání
+- ✅ Rychlé dotopení po dlouhé absenci
+- ✅ Cyklus se používá pro učení (na rozdíl od POST-VENT)
+- ✅ Konfigurovatelný threshold přes UI
 
 ## 🎯 Jak to funguje
 
