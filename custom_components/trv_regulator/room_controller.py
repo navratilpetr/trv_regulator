@@ -528,6 +528,13 @@ class RoomController:
                 f"TRV [{self._room_name}]: POST-VENT mode cancelled due to target change"
             )
         
+        # Reset RECOVERY flag pokud je změna targetu během HEATING nebo COOLDOWN
+        if self._recovery_mode and self._state in (STATE_HEATING, STATE_COOLDOWN):
+            self._recovery_mode = False
+            _LOGGER.debug(
+                f"TRV [{self._room_name}]: RECOVERY mode cancelled due to target change"
+            )
+        
         # Vynutit refresh pomocí callback
         if self._refresh_callback:
             await self._refresh_callback()
@@ -740,6 +747,12 @@ class RoomController:
                     self._post_vent_mode = False
                     _LOGGER.debug(
                         f"TRV [{self._room_name}]: POST-VENT mode cancelled due to window opening"
+                    )
+                # Reset RECOVERY flag pokud byl aktivní
+                if self._recovery_mode:
+                    self._recovery_mode = False
+                    _LOGGER.debug(
+                        f"TRV [{self._room_name}]: RECOVERY mode cancelled due to window opening"
                     )
             elif old_state == STATE_COOLDOWN:
                 _LOGGER.info(
