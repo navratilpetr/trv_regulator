@@ -123,11 +123,28 @@ custom_components/trv_regulator/
 - regulátor řídí jen aktivní TRV
 - všechny aktivní TRV se řídí synchronně
 
+**Formát (od VERSION 3):**
+```python
+[
+    {
+        "entity": "climate.hlavice_loznice",
+        "enabled": True,
+        "last_seen_sensor": "sensor.hlavice_loznice_last_seen"  # volitelné (v3.0.21+)
+    }
+]
+```
+
 **Řízení TRV:**
 ```python
 ON  → hvac_mode: heat, temperature: 35
 OFF → hvac_mode: heat, temperature: 5
 ```
+
+**Last seen monitoring (v3.0.21+):**
+- Volitelný `last_seen_sensor` (device_class: timestamp)
+- Detekuje vybité baterie a slabý Zigbee signál
+- Kontroluje změnu last_seen před/po odeslání příkazu
+- Rate limiting ERROR logů (max 1x/30min)
 
 ---
 

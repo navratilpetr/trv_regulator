@@ -7,6 +7,51 @@ a projekt dodržuje [sémantické verzování](https://semver.org/lang/cs/).
 
 ## [Unreleased]
 
+## [3.0.21] - 2026-02-05
+
+### Přidáno
+- 🔋 **Last seen sensor monitoring** - Detekce vybité baterie nebo slabého Zigbee signálu
+  - Volitelné přiřazení `last_seen` timestamp sensorů k TRV hlavicím
+  - Kontrola změny `last_seen` po odeslání příkazu
+  - ERROR log pokud TRV neodpověděla (last_seen nezměněn)
+  - Rate limiting ERROR logů - max 1x za 30 minut na TRV
+  - Rozlišuje slabou baterii vs slabý signál vs command lost
+  - Konfigurovat lze při instalaci nebo později přes Options Flow
+  - Nový failure reason: `no_response` (last_seen nezměněn)
+
+### Opraveno
+- 🐛 **DEBUG log spam v watchdog**
+  - Odstraněn duplicitní DEBUG log pro mode mismatch (řádky 1110-1113)
+  - Mode mismatch už se loguje jen v `reliability_tracker.mode_mismatch()`
+  - **Důvod:** Každých 30s se logovalo "in auto mode but temperature correct" pro TRV které preferují auto mode
+
+### Změněno
+- ⚙️ **Config Flow VERSION 2 → 3** (vyžaduje restart po aktualizaci)
+  - TRV entities struktura změněna z `list[str]` na `list[dict]`
+  - Přidán volitelný `last_seen_sensor` atribut pro každou TRV
+  - Automatická migrace při startu (zachována backwards compatibility)
+  - Nový krok 2.5 v config flow - přiřazení last_seen sensorů
+  - Options Flow rozšířen o konfiguraci last_seen sensorů
+
+### Technické změny
+- Rozšířen `const.py`:
+  - `FAILURE_REASON_NO_RESPONSE = "no_response"` - nový failure reason
+  - `ERROR_LOG_RATE_LIMIT = 1800` sekund (30 min) - rate limit pro ERROR logy
+- Upraven `config_flow.py`:
+  - VERSION zvýšeno na 3
+  - Nový krok `async_step_last_seen()` pro přiřazení sensorů
+  - Migrace `async_migrate_entry()` pro upgrade z VERSION 2
+  - Options flow rozšířen o `async_step_init()` s last_seen konfigurací
+- Upraven `room_controller.py`:
+  - Metoda `_set_all_trv()` - kontrola last_seen před/po příkazu
+  - Nová metoda `_should_log_no_response_error()` - rate limiting
+  - Smazány řádky 1110-1113 (duplicitní DEBUG log)
+  - Inicializace `_last_no_response_error_log = {}` v `__init__`
+- Upraven `__init__.py`:
+  - Přidána migrace VERSION 2 → 3
+- Rozšířen `strings.json` - Czech translace pro nové kroky
+- Aktualizován `manifest.json` - version 3.0.21
+
 ## [3.0.20] - 2026-02-05 09:07
 
 ## [3.0.19] - 2026-02-04

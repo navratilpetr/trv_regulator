@@ -63,7 +63,14 @@ Custom integrace pro Home Assistant - **ON/OFF řízení s adaptivním učením*
 - **TRV hlavice** - jeden nebo více termostatů
 
 ### Volitelné entity a parametry:
+
 - **Okna** - binary senzory pro detekci větrání
+- **Last seen sensory** - timestamp senzory pro detekci vybité baterie/slabého signálu (volitelné, od v3.0.21)
+  - Formát: `sensor.{název_trv}_last_seen` s `device_class: timestamp`
+  - Detekuje kdy TRV přestane reagovat na příkazy
+  - Automaticky rozlišuje slabou baterii vs slabý Zigbee signál
+  - Lze přiřadit při instalaci nebo později v Nastavení → Možnosti
+  - Pokud není nakonfigurován, používá se jen temperature verification
 - **Hystereze** - rozsah teplot pro přepínání stavů (0.0-2.0°C, výchozí: 0.3°C)
 - **Zpoždění větrání** - čas do aktivace větrání (30-600s, výchozí: 120s)
 
