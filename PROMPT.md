@@ -50,6 +50,20 @@ OFF → hvac_mode: heat, temperature: 5  # POZOR: režim "heat", ne "off"!
 - důvod: uživatel může TRV ručně vypnout v HA
 - `hvac_mode: heat` místo `off` kvůli kompatibilitě se Zigbee TRV hlavicemi
 
+### 🆕 TRV Mode Mismatch Tolerance (v3.0.17+)
+
+**Některé TRV hlavice automaticky přepínají mode:**
+- Příklad: Hlavice přepne z `heat` na `auto` i když teplota je správně nastavena
+- **Integrace TO RESPEKTUJE:**
+  - Pokud `temperature` sedí (35°C nebo 5°C) → command je **úspěšný**
+  - Mode mismatch je zaznamenán ale **není považován za failure**
+  - Automatická detekce `preferred_mode` (auto/heat) pro každou TRV
+  
+**Watchdog chování:**
+- Kontroluje **JEN `temperature`**, ne `hvac_mode`
+- Opraví jen pokud teplota NESEDÍ (±0.5°C tolerance)
+- Mode mismatch → jen DEBUG log, žádná oprava
+
 ### Integrace řeší pouze místnosti
 - Každá místnost = jeden `RoomController`
 - `RoomController` je stavový automat
@@ -76,6 +90,7 @@ custom_components/trv_regulator/
 ├── config_flow.py       # UI konfigurace (Config Flow + Options Flow)
 ├── const.py             # Konstanty (stavy, timeouty)
 ├── room_controller.py   # RoomController (stavový automat)
+├── reliability_tracker.py    # 🆕 Reliability tracking (v3.0.17+)
 ├── coordinator.py       # DataUpdateCoordinator (sync s HA)
 ├── sensor.py            # Diagnostické senzory
 ├── services.yaml        # Definice services
@@ -138,6 +153,98 @@ OFF → hvac_mode: heat, temperature: 5
 #### ~~`door_entities`~~ (ODSTRANĚNO)
 - sloučeno s `window_entities`
 - zachována zpětná kompatibilita v kódu
+
+---
+
+## 🆕 📊 Reliability Tracking (v3.0.17+)
+
+### Smart Mode Detection
+- **Mode mismatch tolerance** - některé TRV hlavice preferují `auto` mode místo `heat`
+- Pokud TRV změní mode ale teplota SEDÍ → **není to failure!**
+- Automatická detekce `preferred_mode` pro každou TRV
+- Separátní tracking: `mode_mismatches` vs `command_failures`
+
+### Watchdog Behavior
+- Watchdog kontroluje **pouze teplotu**, ne hvac_mode
+- Pokud teplota sedí (±0.5°C tolerance) → žádná oprava, jen DEBUG log
+- Pokud teplota NESEDÍ → oprava + WARNING log + tracking
+- **TRV_COMMAND_VERIFY_DELAY:** 15 sekund (čas na aplikaci příkazu)
+
+### Reliability Metrics
+- `commands_sent_total` - celkový počet příkazů
+- `commands_failed_total` - reálné failures (ztracené příkazy, slabý signál)
+- `mode_mismatches_total` - TRV změnila mode (není chyba!)
+- `watchdog_corrections_total` - kolikrát watchdog opravil stav
+- **Multi-window stats:** 1h, 24h, 7d, 30d
+
+### Per-TRV Statistics
+Pro místnosti s více hlavicemi (2+ TRV):
+- Individuální metriky pro každou TRV
+- `success_rate`, `signal_quality`, `preferred_mode`
+- Viditelné v `trv_statistics` atributu reliability sensoru
+- Umožňuje identifikovat problematickou hlavici
+
+---
+
+## 🆕 🔢 Sensory (v3.0.0+)
+
+Integrace vytváří následující sensory pro každou místnost:
+
+### State Sensor (`sensor.trv_regulator_{room}_state`)
+- **State:** `idle`, `heating`, `cooldown`, `vent`, `error`
+- **Atributy:** current_temp, target_temp, state_duration, heating_start, ...
+
+### Reliability Sensor (`sensor.trv_regulator_{room}_reliability`)
+- **State:** `strong`, `medium`, `weak` (podle reliability_rate)
+- **Atributy:** 
+  - `reliability_rate` (0-100%)
+  - `signal_quality` (strong ≥98% / medium 90-98% / weak <90%)
+  - `failed_commands_24h`, `watchdog_corrections_24h`
+  - `mode_mismatches_total`
+  - `command_history` (10 posledních - omezeno v3.0.18+)
+  - `correction_history` (10 posledních - omezeno v3.0.18+)
+  - `trv_statistics` (per-TRV data pro více hlavic)
+
+### Learning Sensor (`sensor.trv_regulator_{room}_learning`)
+- **State:** `learning` / `learned`
+- **Atributy:** valid_cycles, avg_heating_duration, time_offset, is_learning, ...
+
+### Stats Sensor (`sensor.trv_regulator_{room}_stats`)
+- **State:** počet validních cyklů
+- **Atributy:** agregované statistiky ze všech cyklů
+
+### History Sensor (`sensor.trv_regulator_{room}_history`)
+- **State:** celkový počet cyklů
+- **Atributy:** `cycles` (20 posledních - omezeno v3.0.19+)
+
+### Diagnostics Sensor (`sensor.trv_regulator_{room}_diagnostics`)
+- **State:** `healthy` / `warning` / `error`
+- **Atributy:** různé diagnostické info
+
+### Last Cycle Sensor (`sensor.trv_regulator_{room}_last_cycle`)
+- **State:** timestamp posledního cyklu
+- **Atributy:** detaily posledního dokončeného topného cyklu
+
+---
+
+## 🆕 🔧 Sensor Atributy - Omezení velikosti (v3.0.18+)
+
+### Reliability Sensor Optimalizace
+- `command_history`: max **10 posledních** záznamů (bylo neomezené)
+- `correction_history`: max **10 posledních** záznamů
+- ~~`hourly_stats`, `daily_stats`~~: **odstraněno** z atributů (zůstává v JSON)
+- **Důvod:** Home Assistant Recorder limit 16 KB pro state attributes
+
+### History Sensor Optimalizace
+- `cycles`: max **20 posledních** cyklů (bylo ~100)
+- **Důvod:** Recorder limit 16 KB
+- **Plná historie (100 cyklů)** zůstává v JSON persistence
+
+### JSON Persistence
+- Kompletní data uložena v `.storage/trv_regulator_learned_params.json`
+- Načítá se při startu Home Assistantu
+- Obsahuje všech 100 cyklů + kompletní reliability metriky
+- Žádné omezení velikosti
 
 ---
 
@@ -255,6 +362,8 @@ Cyklus je **nevalidní** pokud:
 ✅ žádný stav se nesmí zaseknout  
 ✅ více TRV respektuje enable/disable  
 ✅ COOLDOWN vždy měří překmit  
+✅ 🆕 watchdog kontroluje jen teplotu (v3.0.17+)  
+✅ 🆕 mode mismatch není považován za failure (v3.0.17+)  
 
 ---
 
@@ -269,6 +378,26 @@ TRV [Kuchyn]: Heating stopped after 1450s, entering COOLDOWN
 TRV [Kuchyn]: COOLDOWN → IDLE
 TRV [Kuchyn]: Cycle finished - duration=1450s, overshoot=0.25°C, valid=true
 TRV [Kuchyn]: LEARNING COMPLETE! avg_duration=1440s, time_offset=45s
+```
+
+### 🆕 Mode mismatch detection (v3.0.17+)
+```
+WARNING: TRV [loznice]: climate.hlavice_loznice mode differs 
+(expected: heat, got: auto) but temperature is correct (5.0°C) - TRV prefers auto mode
+
+DEBUG: Reliability [loznice]: Mode mismatch for climate.hlavice_loznice 
+(expected: heat, got: auto, temp: 5.0°C) - TRV prefers auto
+```
+
+### 🆕 Watchdog behavior (v3.0.17+)
+```
+# Temperature mismatch - REAL problem:
+WARNING: TRV [loznice]: STATE MISMATCH detected! 
+Expected: 35°C, Actual: 5°C (mode: auto) - CORRECTING NOW
+
+# Mode mismatch but temp OK - just DEBUG:
+DEBUG: TRV [loznice]: climate.hlavice_loznice in auto mode 
+(expected heat) but temperature correct (5.0°C)
 ```
 
 ---
@@ -288,16 +417,27 @@ TRV [Kuchyn]: LEARNING COMPLETE! avg_duration=1440s, time_offset=45s
 | Ruční vypnutí TRV v HA | Při příštím update integrace přepíše |
 | Více oken, jedno otevřené | Spustí větrání (OR logika) |
 | TRV s `enabled: false` | Ignorována při řízení |
+| 🆕 TRV změní mode na auto (v3.0.17+) | Pokud teplota sedí → success, jen DEBUG log |
+| 🆕 TRV ztratí příkaz (v3.0.17+) | Watchdog opraví po 15s, zaznamená failure |
+
+---
+
+## ✅ UŽ IMPLEMENTOVÁNO (neměnit!)
+
+- ✅ více místností najednou (multiple config entries)
+- ✅ adaptivní offset (průběžná adaptace time_offset podle překmitu)
+- ✅ reliability tracking (v3.0.17+)
+- ✅ mode mismatch tolerance (v3.0.17+)
+- ✅ per-TRV statistiky (v3.0.17+)
+- ✅ sensor atributy optimalizovány pro Recorder (v3.0.18+, v3.0.19+)
 
 ---
 
 ## ❌ ZATÍM NEŘEŠIT (ale neblokovat architekturu)
 
-- více místností najednou (už funguje přes multiple config entries)
-- dveře jako samostatný vstup (sloučeno s okny)
-- adaptivní učení - PID (existuje adaptivní offset)
 - hydraulické vyvažování
 - řízení kotle
+- PID regulace (záměrně nepoužíváme - ON/OFF režim)
 
 ---
 
@@ -311,6 +451,17 @@ TRV [Kuchyn]: LEARNING COMPLETE! avg_duration=1440s, time_offset=45s
 ✅ maximální čitelnost chování  
 ✅ COOLDOWN vždy měří překmit  
 ✅ POST-VENT je režim, ne stav  
+✅ 🆕 watchdog kontroluje jen teplotu (v3.0.17+)  
+✅ 🆕 mode mismatch tolerance (v3.0.17+)  
+✅ 🆕 sensor atributy pod 16 KB limitem (v3.0.18+, v3.0.19+)  
+
+---
+
+## 📚 Další dokumentace
+
+- **Historie změn:** viz [CHANGELOG.md](CHANGELOG.md)
+- **Instalace a konfigurace:** viz [README.md](README.md)
+- **Dashboard příklady:** viz README.md - sekce Lovelace UI
 
 ---
 
