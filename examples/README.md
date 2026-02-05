@@ -38,15 +38,6 @@ A comprehensive dashboard showing:
 # Replace entity names with your actual room and TRV names
 ```
 
-**Note:** You'll need to update the entity IDs in the glance section to match your actual TRV entities:
-```yaml
-entities:
-  - entity: sensor.trv_YOUR_TRV_1_reliability
-    name: TRV 1
-  - entity: sensor.trv_YOUR_TRV_2_reliability
-    name: TRV 2
-```
-
 ### 3. `lovelace_apexcharts.yaml` - Trend Graph
 
 Beautiful trend visualization showing reliability over the last 7 days.
@@ -80,24 +71,10 @@ sensor.trv_regulator_{ROOM_NAME}_reliability
 - `commands_sent_1h/24h/7d/30d`: Total commands in time windows
 - `signal_trend`: improving / stable / deteriorating
 - `trv_statistics`: Per-TRV detailed statistics
-- `hourly_stats`: Last 720 hours (30 days)
-- `daily_stats`: Last 30 days
-- `command_history`: Last 100 commands
-- `correction_history`: Last 100 corrections
+- `command_history`: Last 10 commands (optimized v3.0.18+)
+- `correction_history`: Last 10 corrections (optimized v3.0.18+)
 
-### Per-TRV Reliability Sensors
-```
-sensor.{TRV_NAME}_reliability
-```
-
-**State:** `weak` / `medium` / `strong` / `unknown`
-
-**Attributes:**
-- `commands_sent`: Total commands sent to this TRV
-- `commands_failed`: Total failed commands
-- `success_rate`: Success percentage
-- `signal_quality`: weak / medium / strong
-- `last_seen`: Last command timestamp
+**NOTE:** `hourly_stats` and `daily_stats` removed from attributes (kept in JSON persistence only)
 
 ## Understanding Signal Quality
 
