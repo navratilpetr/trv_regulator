@@ -707,7 +707,8 @@ class RoomController:
         # Akce podle nového stavu
         if new_state == STATE_HEATING:
             # Detekovat velký teplotní rozdíl → RECOVERY mode
-            temp_delta = abs(target - temp)
+            # Používáme (target - temp) aby RECOVERY aktivoval jen při poklesu (temp < target)
+            temp_delta = target - temp
             if temp_delta > self._recovery_threshold:
                 self._recovery_mode = True
                 _LOGGER.info(
@@ -796,7 +797,7 @@ class RoomController:
                 f"(will heat until target is reached)"
             )
         elif self._recovery_mode:
-            temp_delta = abs(target - temp)
+            temp_delta = target - temp
             _LOGGER.info(
                 f"TRV [{self._room_name}]: Started RECOVERY cycle "
                 f"(delta={temp_delta:.1f}°C, heating until target)"
