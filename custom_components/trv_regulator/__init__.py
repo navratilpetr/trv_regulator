@@ -80,6 +80,32 @@ async def async_migrate_entry(hass, config_entry: ConfigEntry) -> bool:
             f"(odstraněn nepoužívaný parametr learning_speed)"
         )
     
+    if config_entry.version == 2:
+        new_data = {**config_entry.data}
+        
+        # Převést TRV entities na nový formát (VERSION 3)
+        old_trv_entities = new_data.get("trv_entities", [])
+        if old_trv_entities and isinstance(old_trv_entities[0], str):
+            new_data["trv_entities"] = [
+                {
+                    "entity": entity,
+                    "enabled": True,
+                    "last_seen_sensor": ""  # prázdné - uživatel může přidat později
+                }
+                for entity in old_trv_entities
+            ]
+        
+        hass.config_entries.async_update_entry(
+            config_entry,
+            data=new_data,
+            version=3
+        )
+        
+        _LOGGER.info(
+            f"Migrace konfigurace z verze 2 na 3 "
+            f"(trv_entities převedeny na dict formát s last_seen_sensor)"
+        )
+    
     return True
 
 

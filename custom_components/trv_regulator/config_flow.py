@@ -1,6 +1,7 @@
 """Config flow pro TRV Regulator."""
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.core import callback
 from homeassistant.helpers import selector
 import homeassistant.helpers.config_validation as cv
 
@@ -20,11 +21,35 @@ from .const import (
 class TrvRegulatorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Config flow pro TRV Regulator."""
 
-    VERSION = 2
+    VERSION = 3
 
     def __init__(self):
         """Inicializace config flow."""
         self._data = {}
+
+    @staticmethod
+    @callback
+    def async_migrate_entry(hass, config_entry):
+        """Migrate old entry."""
+        if config_entry.version == 2:
+            new_data = {**config_entry.data}
+            
+            # Převést TRV entities na nový formát
+            old_trv_entities = new_data.get("trv_entities", [])
+            if old_trv_entities and isinstance(old_trv_entities[0], str):
+                new_data["trv_entities"] = [
+                    {
+                        "entity": entity,
+                        "enabled": True,
+                        "last_seen_sensor": ""  # prázdné - uživatel může přidat později
+                    }
+                    for entity in old_trv_entities
+                ]
+            
+            config_entry.version = 3
+            hass.config_entries.async_update_entry(config_entry, data=new_data)
+            
+        return True
 
     async def async_step_user(self, user_input=None):
         """Krok 1: Základní informace."""
@@ -45,7 +70,7 @@ class TrvRegulatorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Krok 2: Povinné entity."""
         if user_input is not None:
             self._data.update(user_input)
-            return await self.async_step_optional()
+            return await self.async_step_last_seen()
 
         return self.async_show_form(
             step_id="entities",
@@ -64,6 +89,49 @@ class TrvRegulatorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     ),
                 }
             ),
+        )
+
+    async def async_step_last_seen(self, user_input=None):
+        """Krok 2.5: Přiřazení last_seen sensorů k TRV (volitelné)."""
+        if user_input is not None:
+            # Zpracovat přiřazení last_seen sensorů
+            trv_entities = self._data.get("trv_entities", [])
+            trv_entities_with_last_seen = []
+            
+            for trv_id in trv_entities:
+                last_seen_sensor = user_input.get(f"last_seen_{trv_id}", "")
+                trv_entities_with_last_seen.append({
+                    "entity": trv_id,
+                    "enabled": True,
+                    "last_seen_sensor": last_seen_sensor
+                })
+            
+            self._data["trv_entities"] = trv_entities_with_last_seen
+            return await self.async_step_optional()
+        
+        # Vytvořit dynamický schema pro každou TRV
+        trv_entities = self._data.get("trv_entities", [])
+        schema_dict = {}
+        
+        for trv_id in trv_entities:
+            # Získat friendly name
+            state = self.hass.states.get(trv_id)
+            if state:
+                friendly_name = state.attributes.get("friendly_name", trv_id)
+            else:
+                friendly_name = trv_id
+            
+            # Přidat optional selector pro last_seen sensor
+            schema_dict[vol.Optional(f"last_seen_{trv_id}", description=f"{friendly_name} ({trv_id})")] = selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="sensor",
+                    device_class="timestamp"
+                )
+            )
+        
+        return self.async_show_form(
+            step_id="last_seen",
+            data_schema=vol.Schema(schema_dict),
         )
 
     async def async_step_optional(self, user_input=None):
@@ -126,7 +194,7 @@ class TrvRegulatorOptionsFlow(config_entries.OptionsFlow):
         errors = {}
         
         if user_input is not None:
-            # Zpracovat změny TRV enabled/disabled
+            # Zpracovat změny TRV enabled/disabled a last_seen
             trv_entities = self.config_entry.data.get("trv_entities", [])
             enabled_trv_ids = user_input.get("enabled_trv_entities", [])
             
@@ -134,26 +202,34 @@ class TrvRegulatorOptionsFlow(config_entries.OptionsFlow):
             if not enabled_trv_ids:
                 errors["base"] = "at_least_one_trv_required"
             else:
-                # Rekonstruovat trv_entities s novým enabled stavem
-                # Zachovat formát - pokud jsou již ve formátu dict, použít to, jinak vytvořit dict
+                # Rekonstruovat trv_entities s novým enabled stavem a last_seen
                 new_trv_entities = []
                 for trv in trv_entities:
                     # Zjistit entity_id - může být string nebo dict
                     if isinstance(trv, dict):
                         entity_id = trv["entity"]
+                        current_last_seen = trv.get("last_seen_sensor", "")
                     else:
                         entity_id = trv
+                        current_last_seen = ""
+                    
+                    # Získat last_seen z user_input nebo zachovat současný
+                    last_seen_sensor = user_input.get(f"last_seen_{entity_id}", current_last_seen)
                     
                     new_trv_entities.append({
                         "entity": entity_id,
-                        "enabled": entity_id in enabled_trv_ids
+                        "enabled": entity_id in enabled_trv_ids,
+                        "last_seen_sensor": last_seen_sensor
                     })
                 
                 # Aktualizovat config entry s novými daty
                 new_data = {**self.config_entry.data, "trv_entities": new_trv_entities}
                 
-                # Uložit options (bez trv_entities, to je v data)
-                new_options = {k: v for k, v in user_input.items() if k != "enabled_trv_entities"}
+                # Uložit options (bez trv_entities a last_seen_*, to je v data)
+                new_options = {
+                    k: v for k, v in user_input.items() 
+                    if k != "enabled_trv_entities" and not k.startswith("last_seen_")
+                }
                 
                 self.hass.config_entries.async_update_entry(
                     self.config_entry,
@@ -198,57 +274,86 @@ class TrvRegulatorOptionsFlow(config_entries.OptionsFlow):
         # Načíst aktuální hodnoty z options nebo fallback na data
         current_options = self.config_entry.options
         current_data = self.config_entry.data
+        
+        # Vytvořit dynamický schema s last_seen sensory pro každou TRV
+        schema_dict = {
+            vol.Optional(
+                "enabled_trv_entities",
+                default=enabled_trv_ids,
+                description={"suggested_value": enabled_trv_ids}
+            ): cv.multi_select(trv_options),
+        }
+        
+        # Přidat last_seen sensor pro každou TRV
+        for trv in trv_entities:
+            if isinstance(trv, dict):
+                entity_id = trv["entity"]
+                current_last_seen = trv.get("last_seen_sensor", "")
+            else:
+                entity_id = trv
+                current_last_seen = ""
+            
+            # Získat friendly name
+            state = self.hass.states.get(entity_id)
+            friendly_name = state.attributes.get("friendly_name", entity_id) if state else entity_id
+            
+            schema_dict[vol.Optional(
+                f"last_seen_{entity_id}",
+                default=current_last_seen,
+                description=f"Last seen sensor pro {friendly_name}"
+            )] = selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="sensor",
+                    device_class="timestamp"
+                )
+            )
+        
+        # Přidat ostatní konfigurace
+        schema_dict.update({
+            vol.Optional(
+                "window_entities",
+                default=current_options.get("window_entities", current_data.get("window_entities", []))
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="binary_sensor", multiple=True
+                )
+            ),
+            vol.Optional(
+                "hysteresis",
+                default=current_options.get("hysteresis", current_data.get("hysteresis", DEFAULT_HYSTERESIS))
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=2.0)),
+            vol.Optional(
+                "window_open_delay",
+                default=current_options.get("window_open_delay", current_data.get("window_open_delay", DEFAULT_WINDOW_OPEN_DELAY))
+            ): vol.All(vol.Coerce(int), vol.Range(min=30, max=600)),
+            vol.Optional(
+                "learning_cycles_required",
+                default=current_options.get("learning_cycles_required", current_data.get("learning_cycles_required", DEFAULT_LEARNING_CYCLES))
+            ): vol.All(vol.Coerce(int), vol.Range(min=5, max=30)),
+            vol.Optional(
+                "desired_overshoot",
+                default=current_options.get("desired_overshoot", current_data.get("desired_overshoot", DEFAULT_DESIRED_OVERSHOOT))
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=0.5)),
+            vol.Optional(
+                "min_heating_duration",
+                default=current_options.get("min_heating_duration", current_data.get("min_heating_duration", DEFAULT_MIN_HEATING_DURATION))
+            ): vol.All(vol.Coerce(int), vol.Range(min=60, max=600)),
+            vol.Optional(
+                "max_heating_duration",
+                default=current_options.get("max_heating_duration", current_data.get("max_heating_duration", DEFAULT_MAX_HEATING_DURATION))
+            ): vol.All(vol.Coerce(int), vol.Range(min=900, max=10800)),
+            vol.Optional(
+                "max_valid_overshoot",
+                default=current_options.get("max_valid_overshoot", current_data.get("max_valid_overshoot", DEFAULT_MAX_VALID_OVERSHOOT))
+            ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=5.0)),
+            vol.Optional(
+                "cooldown_duration",
+                default=current_options.get("cooldown_duration", current_data.get("cooldown_duration", DEFAULT_COOLDOWN_DURATION))
+            ): vol.All(vol.Coerce(int), vol.Range(min=600, max=1800)),
+        })
 
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Optional(
-                        "enabled_trv_entities",
-                        default=enabled_trv_ids,
-                        description={"suggested_value": enabled_trv_ids}
-                    ): cv.multi_select(trv_options),
-                    vol.Optional(
-                        "window_entities",
-                        default=current_options.get("window_entities", current_data.get("window_entities", []))
-                    ): selector.EntitySelector(
-                        selector.EntitySelectorConfig(
-                            domain="binary_sensor", multiple=True
-                        )
-                    ),
-                    vol.Optional(
-                        "hysteresis",
-                        default=current_options.get("hysteresis", current_data.get("hysteresis", DEFAULT_HYSTERESIS))
-                    ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=2.0)),
-                    vol.Optional(
-                        "window_open_delay",
-                        default=current_options.get("window_open_delay", current_data.get("window_open_delay", DEFAULT_WINDOW_OPEN_DELAY))
-                    ): vol.All(vol.Coerce(int), vol.Range(min=30, max=600)),
-                    vol.Optional(
-                        "learning_cycles_required",
-                        default=current_options.get("learning_cycles_required", current_data.get("learning_cycles_required", DEFAULT_LEARNING_CYCLES))
-                    ): vol.All(vol.Coerce(int), vol.Range(min=5, max=30)),
-                    vol.Optional(
-                        "desired_overshoot",
-                        default=current_options.get("desired_overshoot", current_data.get("desired_overshoot", DEFAULT_DESIRED_OVERSHOOT))
-                    ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=0.5)),
-                    vol.Optional(
-                        "min_heating_duration",
-                        default=current_options.get("min_heating_duration", current_data.get("min_heating_duration", DEFAULT_MIN_HEATING_DURATION))
-                    ): vol.All(vol.Coerce(int), vol.Range(min=60, max=600)),
-                    vol.Optional(
-                        "max_heating_duration",
-                        default=current_options.get("max_heating_duration", current_data.get("max_heating_duration", DEFAULT_MAX_HEATING_DURATION))
-                    ): vol.All(vol.Coerce(int), vol.Range(min=900, max=10800)),
-                    vol.Optional(
-                        "max_valid_overshoot",
-                        default=current_options.get("max_valid_overshoot", current_data.get("max_valid_overshoot", DEFAULT_MAX_VALID_OVERSHOOT))
-                    ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=5.0)),
-                    vol.Optional(
-                        "cooldown_duration",
-                        default=current_options.get("cooldown_duration", current_data.get("cooldown_duration", DEFAULT_COOLDOWN_DURATION))
-                    ): vol.All(vol.Coerce(int), vol.Range(min=600, max=1800)),
-                }
-            ),
+            data_schema=vol.Schema(schema_dict),
             errors=errors,
         )
