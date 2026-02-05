@@ -67,6 +67,7 @@ class RoomController:
         max_heating_duration: int = DEFAULT_MAX_HEATING_DURATION,
         max_valid_overshoot: float = DEFAULT_MAX_VALID_OVERSHOOT,
         cooldown_duration: int = DEFAULT_COOLDOWN_DURATION,
+        recovery_threshold: float = 1.0,
     ):
         """Inicializace controlleru."""
         self._hass = hass
@@ -83,6 +84,7 @@ class RoomController:
         self._max_heating_duration = max_heating_duration
         self._max_valid_overshoot = max_valid_overshoot
         self._cooldown_duration = cooldown_duration
+        self._recovery_threshold = recovery_threshold
 
         # Stavový automat
         self._state = STATE_IDLE
@@ -98,6 +100,9 @@ class RoomController:
         
         # POST-VENT režim
         self._post_vent_mode = False
+        
+        # RECOVERY režim
+        self._recovery_mode = False
         
         # Aktuální cyklus
         self._current_cycle = {}
@@ -137,7 +142,8 @@ class RoomController:
             f"TRV [{self._room_name}] initialized (ON/OFF mode): "
             f"hysteresis={self._hysteresis}°C, "
             f"window_open_delay={self._window_open_delay}s, "
-            f"learning_cycles_required={self._learning_cycles_required}"
+            f"learning_cycles_required={self._learning_cycles_required}, "
+            f"recovery_threshold={self._recovery_threshold}°C"
         )
 
     @property
@@ -621,6 +627,15 @@ class RoomController:
                                 f"(temp={temp:.1f}°C >= target={target:.1f}°C) after {elapsed:.0f}s"
                             )
                         return STATE_COOLDOWN
+                elif self._recovery_mode:
+                    # RECOVERY mode - topíme až do dosažení targetu
+                    if temp >= target:
+                        _LOGGER.info(
+                            f"TRV [{self._room_name}]: RECOVERY mode - target reached "
+                            f"({temp:.1f}°C >= {target:.1f}°C) after {elapsed:.0f}s, stopping heating"
+                        )
+                        self._recovery_mode = False  # Vypnout flag
+                        return STATE_COOLDOWN
                 else:
                     # LEARNED: vypnout podle času NEBO při dosažení targetu
                     # Bezpečnostní kontrola: pokud nemáme naučené parametry, fallback na čekání na target
@@ -684,6 +699,17 @@ class RoomController:
         
         # Akce podle nového stavu
         if new_state == STATE_HEATING:
+            # Detekovat velký teplotní rozdíl → RECOVERY mode
+            temp_delta = abs(target - temp)
+            if temp_delta > self._recovery_threshold:
+                self._recovery_mode = True
+                _LOGGER.info(
+                    f"TRV [{self._room_name}]: Large temperature delta detected "
+                    f"({temp_delta:.1f}°C), entering RECOVERY mode"
+                )
+            else:
+                self._recovery_mode = False
+            
             # Pokud přecházíme z VENT, zapnout POST-VENT režim
             if old_state == STATE_VENT:
                 self._post_vent_mode = True
@@ -755,6 +781,12 @@ class RoomController:
             _LOGGER.info(
                 f"TRV [{self._room_name}]: Started POST-VENT cycle "
                 f"(will heat until target is reached)"
+            )
+        elif self._recovery_mode:
+            temp_delta = abs(target - temp)
+            _LOGGER.info(
+                f"TRV [{self._room_name}]: Started RECOVERY cycle "
+                f"(delta={temp_delta:.1f}°C, heating until target)"
             )
         elif self._is_learning:
             _LOGGER.info(

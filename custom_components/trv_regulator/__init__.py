@@ -16,6 +16,7 @@ from .const import (
     DEFAULT_MAX_HEATING_DURATION,
     DEFAULT_MAX_VALID_OVERSHOOT,
     DEFAULT_COOLDOWN_DURATION,
+    DEFAULT_RECOVERY_THRESHOLD,
     TARGET_DEBOUNCE_DELAY,
     TRV_OFF,
 )
@@ -164,6 +165,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         max_heating_duration=get_config_value("max_heating_duration", DEFAULT_MAX_HEATING_DURATION),
         max_valid_overshoot=get_config_value("max_valid_overshoot", DEFAULT_MAX_VALID_OVERSHOOT),
         cooldown_duration=get_config_value("cooldown_duration", DEFAULT_COOLDOWN_DURATION),
+        recovery_threshold=get_config_value("recovery_threshold", DEFAULT_RECOVERY_THRESHOLD),
     )
 
     # Načíst naučené parametry asynchronně
