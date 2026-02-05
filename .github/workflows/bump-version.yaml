@@ -22,20 +22,86 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       # --------------------------------------------------
-      # 1) Kontrola, ze v PR nebyla rucne zmenena verze
+      # 1) Detekce scope zmen (infrastructure vs integration)
       # --------------------------------------------------
-      - name: Check manual version change
+      - name: Check if integration code changed
+        id: scope
         run: |
-          if git diff --name-only HEAD^ HEAD | grep -q "manifest.json"; then
-            echo "❌ V PR NESMIS menit verzi v manifest.json rucne!"
-            echo "Pouzij labels: feature / breaking / nebo zadny (patch)."
-            exit 1
+          # Získat změněné soubory v PR
+          FILES=$(git diff --name-only HEAD^ HEAD)
+
+          # Pokud žádné soubory nebyly změněny, přeskoč
+          if [ -z "$FILES" ]; then
+            echo "⏭️ No files changed - SKIP version bump"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Cesty které NEVYŽADUJÍ version bump:
+          INFRA_PATTERNS=(
+            "^\.github/"          # CI/CD workflows
+            "^\.copilot/"         # Copilot config
+            "^examples/"          # Příklady Lovelace
+            "README\.md$"         # README změny
+            "PROMPT\.md$"         # PROMPT změny
+            "\.editorconfig$"     # Editor config
+            "\.gitignore$"        # Git ignore
+            "CHANGELOG\.md$"      # CHANGELOG (auto-upravuje se)
+          )
+
+          # Zkontroluj jestli VŠECHNY změněné soubory jsou infrastructure
+          INTEGRATION_CHANGED=false
+
+          while IFS= read -r file; do
+            is_infra=false
+
+            for pattern in "${INFRA_PATTERNS[@]}"; do
+              if echo "$file" | grep -qE "$pattern"; then
+                is_infra=true
+                break
+              fi
+            done
+
+            # Pokud soubor NENÍ infrastructure → integration změna
+            if [ "$is_infra" = false ]; then
+              INTEGRATION_CHANGED=true
+              echo "📦 Integration file changed: $file"
+              break
+            fi
+          done <<< "$FILES"
+
+          if [ "$INTEGRATION_CHANGED" = false ]; then
+            echo "⏭️ Only infrastructure files changed - SKIP version bump"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "📦 Integration code changed - CONTINUE with version bump"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
       # --------------------------------------------------
-      # 2) Urceni typu bumpu z labels
+      # 2) Kontrola manualni zmeny verze (Copilot agent)
+      # --------------------------------------------------
+      - name: Check manual version change
+        if: steps.scope.outputs.skip == 'false'
+        id: version_check
+        run: |
+          # Detekovat manuální změnu verze (Copilot agent)
+          if git diff --name-only HEAD^ HEAD | grep -q "manifest.json"; then
+            echo "⚠️ manifest.json changed in PR - using manual version"
+            MANUAL_VERSION=$(jq -r '.version' custom_components/trv_regulator/manifest.json)
+            echo "manual_version=$MANUAL_VERSION" >> "$GITHUB_OUTPUT"
+            echo "version_source=manual" >> "$GITHUB_OUTPUT"
+            echo "✅ Manual version detected: $MANUAL_VERSION"
+          else
+            echo "version_source=auto" >> "$GITHUB_OUTPUT"
+            echo "✅ Will auto-calculate version from labels"
+          fi
+
+      # --------------------------------------------------
+      # 3) Urceni typu bumpu z labels
       # --------------------------------------------------
       - name: Determine version bump
+        if: steps.scope.outputs.skip == 'false'
         id: bump
         run: |
           LABELS="${{ join(github.event.pull_request.labels.*.name, ',') }}"
@@ -51,57 +117,71 @@ jobs:
           echo "type=$TYPE" >> "$GITHUB_OUTPUT"
 
       # --------------------------------------------------
-      # 3) Nacteni aktualni verze
+      # 4) Nacteni aktualni verze
       # --------------------------------------------------
       - name: Read current version
+        if: steps.scope.outputs.skip == 'false' && steps.version_check.outputs.version_source == 'auto'
         id: current
         run: |
           VERSION=$(jq -r '.version' custom_components/trv_regulator/manifest.json)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       # --------------------------------------------------
-      # 4) Vypocet nove verze
+      # 5) Vypocet nove verze
       # --------------------------------------------------
       - name: Calculate new version
+        if: steps.scope.outputs.skip == 'false'
         id: new
         run: |
-          CURRENT="${{ steps.current.outputs.version }}"
-          TYPE="${{ steps.bump.outputs.type }}"
+          if [ "${{ steps.version_check.outputs.version_source }}" = "manual" ]; then
+            # Použít manuální verzi z PR
+            NEW_VERSION="${{ steps.version_check.outputs.manual_version }}"
+            echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+            echo "✅ Using manual version: $NEW_VERSION"
+          else
+            # Spočítat novou verzi podle labels
+            CURRENT="${{ steps.current.outputs.version }}"
+            TYPE="${{ steps.bump.outputs.type }}"
 
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
 
-          case "$TYPE" in
-            major)
-              MAJOR=$((MAJOR + 1))
-              MINOR=0
-              PATCH=0
-              ;;
-            minor)
-              MINOR=$((MINOR + 1))
-              PATCH=0
-              ;;
-            patch)
-              PATCH=$((PATCH + 1))
-              ;;
-          esac
+            case "$TYPE" in
+              major)
+                MAJOR=$((MAJOR + 1))
+                MINOR=0
+                PATCH=0
+                ;;
+              minor)
+                MINOR=$((MINOR + 1))
+                PATCH=0
+                ;;
+              patch)
+                PATCH=$((PATCH + 1))
+                ;;
+            esac
 
-          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
-          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+            NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+            echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+            echo "✅ Auto-calculated version: $NEW_VERSION (type: $TYPE)"
+          fi
 
       # --------------------------------------------------
-      # 5) Update manifest.json bezpecne pres jq
+      # 6) Update manifest.json bezpecne pres jq
       # --------------------------------------------------
       - name: Update manifest.json
+        if: steps.scope.outputs.skip == 'false' && steps.version_check.outputs.version_source == 'auto'
         run: |
           jq '.version = "${{ steps.new.outputs.version }}"' \
             custom_components/trv_regulator/manifest.json > tmp.json
 
           mv tmp.json custom_components/trv_regulator/manifest.json
+          echo "✅ Updated manifest.json to ${{ steps.new.outputs.version }}"
 
       # --------------------------------------------------
-      # 6) Update CHANGELOG
+      # 7) Update CHANGELOG
       # --------------------------------------------------
       - name: Update CHANGELOG
+        if: steps.scope.outputs.skip == 'false'
         run: |
           DATETIME=$(date +"%Y-%m-%d %H:%M")
           VERSION="${{ steps.new.outputs.version }}"
@@ -136,9 +216,10 @@ jobs:
           fi
 
       # --------------------------------------------------
-      # 7) Urci prerelease logiku
+      # 8) Urci prerelease logiku
       # --------------------------------------------------
       - name: Determine prerelease
+        if: steps.scope.outputs.skip == 'false'
         id: pre
         run: |
           if [ "${{ steps.bump.outputs.type }}" = "patch" ]; then
@@ -148,9 +229,10 @@ jobs:
           fi
 
       # --------------------------------------------------
-      # 8) Commit a tag
+      # 9) Commit a tag
       # --------------------------------------------------
       - name: Commit and tag
+        if: steps.scope.outputs.skip == 'false'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -174,9 +256,10 @@ jobs:
           git push origin main --tags
 
       # --------------------------------------------------
-      # 9) Vytvoreni release
+      # 10) Vytvoreni release
       # --------------------------------------------------
       - name: Create GitHub Release
+        if: steps.scope.outputs.skip == 'false'
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
