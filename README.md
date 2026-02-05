@@ -122,7 +122,6 @@ Pro každou místnost:
 - **`sensor.trv_regulator_{room}_stats`** - Statistiky (průměry, úspěšnost)
 - **`sensor.trv_regulator_{room}_diagnostics`** - Stav komponent (diagnostic entity)
 - **`sensor.trv_regulator_{room}_reliability`** - Spolehlivost komunikace s TRV
-- **`sensor.{trv_name}_reliability`** - Individuální spolehlivost pro každou TRV
 
 Pro celou integraci:
 - **`sensor.trv_regulator_summary`** - Přehled všech místností
@@ -144,21 +143,17 @@ TRV Regulator automaticky sleduje spolehlivost komunikace s TRV hlavicemi a pom�
 - `failed_commands_24h`: Počet selhání za 24h
 - `watchdog_corrections_24h`: Počet automatických oprav za 24h
 - `signal_trend`: improving / stable / deteriorating
-- `trv_statistics`: Per-TRV detaily (commands sent/failed, success rate, atd.)
-- `hourly_stats`: Hodinové statistiky (720 záznamů = 30 dní)
-- `daily_stats`: Denní statistiky (30 dní)
-- `command_history`: Historie posledních 100 příkazů
-- `correction_history`: Historie posledních 100 oprav
+- `trv_statistics`: Per-TRV detaily pro každou hlavici:
+  - `commands_sent`: Počet odeslaných příkazů
+  - `commands_failed`: Počet selhání
+  - `success_rate`: % úspěšnost (0-100)
+  - `signal_quality`: weak / medium / strong
+  - `preferred_mode`: Preferovaný hvac_mode (auto/heat)
+  - `last_seen`: Čas posledního příkazu
+- `command_history`: Historie posledních 10 příkazů (optimalizováno v3.0.18+)
+- `correction_history`: Historie posledních 10 oprav (optimalizováno v3.0.18+)
 
-#### Per-TRV Reliability Sensors
-`sensor.{trv_name}_reliability`
-
-Separátní sensor pro každou TRV hlavici s individuálními metrikami:
-- `commands_sent`: Počet odeslaných příkazů
-- `commands_failed`: Počet selhání
-- `success_rate`: % úspěšnost
-- `signal_quality`: weak / medium / strong
-- `last_seen`: Čas posledního příkazu
+**Poznámka:** `hourly_stats` a `daily_stats` byly odstraněny z atributů (zůstávají jen v JSON persistence)
 
 ### Signal Quality Thresholdy
 
