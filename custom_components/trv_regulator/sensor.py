@@ -10,7 +10,6 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.entity import EntityCategory
 
 from .const import DOMAIN
-from .reliability_sensors import TrvIndividualReliabilitySensor
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,25 +32,6 @@ async def async_setup_entry(
         TrvDiagnosticsSensor(coordinator, room_name, entry.entry_id),
         TrvReliabilitySensor(coordinator, room_name, entry.entry_id),
     ]
-    
-    # Add per-TRV reliability sensors
-    trv_entities = entry.data.get("trv_entities", [])
-    for trv_config in trv_entities:
-        # Handle both dict and string formats
-        if isinstance(trv_config, dict):
-            entity_id = trv_config.get("entity")
-        else:
-            entity_id = trv_config
-        
-        if entity_id:
-            sensors.append(
-                TrvIndividualReliabilitySensor(
-                    coordinator,
-                    room_name,
-                    entity_id,
-                    entry.entry_id
-                )
-            )
     
     async_add_entities(sensors)
     
