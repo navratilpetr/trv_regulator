@@ -103,6 +103,7 @@ class RoomController:
         
         # RECOVERY režim
         self._recovery_mode = False
+        self._recovery_temp_delta = None  # Store temp delta for logging
         
         # Aktuální cyklus
         self._current_cycle = {}
@@ -711,12 +712,14 @@ class RoomController:
             temp_delta = target - temp
             if temp_delta > self._recovery_threshold:
                 self._recovery_mode = True
+                self._recovery_temp_delta = temp_delta  # Uložit pro logging
                 _LOGGER.info(
                     f"TRV [{self._room_name}]: Large temperature delta detected "
                     f"({temp_delta:.1f}°C), entering RECOVERY mode"
                 )
             else:
                 self._recovery_mode = False
+                self._recovery_temp_delta = None
             
             # Pokud přecházíme z VENT, zapnout POST-VENT režim
             if old_state == STATE_VENT:
@@ -797,10 +800,9 @@ class RoomController:
                 f"(will heat until target is reached)"
             )
         elif self._recovery_mode:
-            temp_delta = target - temp
             _LOGGER.info(
                 f"TRV [{self._room_name}]: Started RECOVERY cycle "
-                f"(delta={temp_delta:.1f}°C, heating until target)"
+                f"(delta={self._recovery_temp_delta:.1f}°C, heating until target)"
             )
         elif self._is_learning:
             _LOGGER.info(

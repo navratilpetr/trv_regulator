@@ -332,7 +332,8 @@ IDLE → HEATING (s _post_vent_mode = True)
 #### RECOVERY režim (velký teplotní rozdíl)
 
 **Kdy se aktivuje:**
-- Při přechodu do HEATING, pokud `|target - current| > recovery_threshold` (výchozí 1.0°C)
+- Při přechodu do HEATING, pokud `(target - current) > recovery_threshold` (výchozí 1.0°C)
+- Aktivuje se JEN při poklesu teploty (current < target), ne při přestřelení
 
 **Chování:**
 ```
