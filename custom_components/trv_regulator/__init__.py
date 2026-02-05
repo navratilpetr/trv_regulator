@@ -31,7 +31,15 @@ async def _wait_for_entities(hass, entry, max_wait=60):
     target_entity = entry.data.get("target_entity")
     trv_entities = entry.data.get("trv_entities", [])
     
-    all_entities = [temperature_entity, target_entity] + list(trv_entities)
+    # Extrahovat entity IDs z trv_entities (může být list[str] nebo list[dict])
+    trv_entity_ids = []
+    for trv in trv_entities:
+        if isinstance(trv, dict):
+            trv_entity_ids.append(trv["entity"])
+        else:
+            trv_entity_ids.append(trv)
+    
+    all_entities = [temperature_entity, target_entity] + trv_entity_ids
     
     _LOGGER.info(
         f"TRV Regulator: Čekám na dostupnost entit: {', '.join(all_entities)}"
