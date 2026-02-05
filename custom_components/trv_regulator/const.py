@@ -49,6 +49,10 @@ RELIABILITY_CORRECTION_HISTORY = 100  # last N corrections
 FAILURE_REASON_TEMP_MISMATCH = "temperature_mismatch"  # teplota nesedi (REALNE selhani)
 FAILURE_REASON_MODE_MISMATCH = "mode_mismatch"  # mode nesedi, teplota OK (TRV preference)
 FAILURE_REASON_OFFLINE = "offline"  # TRV offline/unavailable
+FAILURE_REASON_NO_RESPONSE = "no_response"  # last_seen se nezmenil (baterie/signal)
+
+# Rate limiting
+ERROR_LOG_RATE_LIMIT = 1800  # 30 minut v sekundach - max frekvence ERROR logu
 
 # Domain
 DOMAIN = "trv_regulator"

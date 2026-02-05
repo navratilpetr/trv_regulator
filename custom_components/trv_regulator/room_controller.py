@@ -35,6 +35,8 @@ from .const import (
     FAILURE_REASON_TEMP_MISMATCH,
     FAILURE_REASON_MODE_MISMATCH,
     FAILURE_REASON_OFFLINE,
+    FAILURE_REASON_NO_RESPONSE,
+    ERROR_LOG_RATE_LIMIT,
 )
 from .reliability_tracker import ReliabilityTracker
 
@@ -127,6 +129,9 @@ class RoomController:
         
         # Reliability tracking
         self._reliability_tracker = ReliabilityTracker(room_name)
+        
+        # Rate limiting pro ERROR logy
+        self._last_no_response_error_log = {}
 
         _LOGGER.info(
             f"TRV [{self._room_name}] initialized (ON/OFF mode): "
@@ -968,6 +973,25 @@ class RoomController:
             f"{mode.upper()} ({temp}°C)"
         )
         
+        # 1️⃣ Zaznamenat last_seen PŘED příkazem
+        last_seen_before = {}
+        for trv_config in self._trv_entities:
+            if not trv_config.get("enabled", True):
+                continue
+            
+            entity_id = trv_config["entity"]
+            last_seen_sensor = trv_config.get("last_seen_sensor")
+            
+            if last_seen_sensor:
+                sensor_state = self._hass.states.get(last_seen_sensor)
+                if sensor_state and sensor_state.state not in ("unavailable", "unknown"):
+                    last_seen_before[entity_id] = sensor_state.state
+                else:
+                    _LOGGER.warning(
+                        f"TRV [{self._room_name}]: {entity_id} last_seen sensor unavailable"
+                    )
+        
+        # 2️⃣ Track command + poslat příkazy
         for trv_config in self._trv_entities:
             if not trv_config.get("enabled", True):
                 continue
@@ -991,10 +1015,10 @@ class RoomController:
                 blocking=True,
             )
         
-        # Počkat a ověřit stav
+        # 3️⃣ Počkat a ověřit stav
         await asyncio.sleep(TRV_COMMAND_VERIFY_DELAY)
         
-        # Verifikovat že všechny TRV přijaly příkaz
+        # 4️⃣ Verifikovat že všechny TRV přijaly příkaz
         for trv_config in self._trv_entities:
             if not trv_config.get("enabled", True):
                 continue
@@ -1002,51 +1026,80 @@ class RoomController:
             entity_id = trv_config["entity"]
             trv_state = self._hass.states.get(entity_id)
             
-            if trv_state:
-                if trv_state.state == "unavailable":
-                    self._reliability_tracker.command_failed(
-                        entity_id,
-                        expected={"hvac_mode": mode, "temperature": temp},
-                        actual={"state": "unavailable"},
-                        reason=FAILURE_REASON_OFFLINE
-                    )
-                    continue
+            if not trv_state or trv_state.state == "unavailable":
+                self._reliability_tracker.command_failed(
+                    entity_id,
+                    expected={"hvac_mode": mode, "temperature": temp},
+                    actual={"state": "unavailable"},
+                    reason=FAILURE_REASON_OFFLINE
+                )
+                continue
+            
+            actual_temp = trv_state.attributes.get("temperature")
+            actual_mode = trv_state.state
+            
+            # Temperature check (existující logika)
+            temp_ok = actual_temp is not None and abs(actual_temp - temp) <= TRV_TEMP_TOLERANCE
+            
+            # 🆕 Last seen check
+            if entity_id in last_seen_before:
+                last_seen_sensor = trv_config.get("last_seen_sensor")
+                sensor_state = self._hass.states.get(last_seen_sensor)
                 
-                actual_temp = trv_state.attributes.get("temperature")
-                actual_mode = trv_state.state
-                
-                # Smart verification - temperature is critical, mode is not
-                temp_ok = actual_temp is not None and abs(actual_temp - temp) <= TRV_TEMP_TOLERANCE
-                mode_ok = actual_mode == mode
-                
-                if not temp_ok:
-                    # CRITICAL ERROR - temperature mismatch!
-                    _LOGGER.error(
-                        f"TRV [{self._room_name}]: {entity_id} FAILED to apply temperature! "
-                        f"Expected: {temp}°C, Got: {actual_temp}°C - Command likely lost due to weak signal"
-                    )
-                    self._reliability_tracker.command_failed(
-                        entity_id,
-                        expected={"hvac_mode": mode, "temperature": temp},
-                        actual={"hvac_mode": actual_mode, "temperature": actual_temp},
-                        reason=FAILURE_REASON_TEMP_MISMATCH
-                    )
-                elif not mode_ok:
-                    # WARNING - mode mismatch but temperature OK (TRV preference)
-                    _LOGGER.warning(
-                        f"TRV [{self._room_name}]: {entity_id} mode differs (expected: {mode}, got: {actual_mode}) "
-                        f"but temperature is correct ({actual_temp}°C) - TRV prefers {actual_mode} mode"
-                    )
-                    self._reliability_tracker.mode_mismatch(
-                        entity_id,
-                        expected_mode=mode,
-                        actual_mode=actual_mode,
-                        temperature=actual_temp
-                    )
-                else:
-                    _LOGGER.debug(
-                        f"TRV [{self._room_name}]: {entity_id} verified OK ({actual_mode}/{actual_temp}°C)"
-                    )
+                if sensor_state and sensor_state.state not in ("unavailable", "unknown"):
+                    last_seen_after = sensor_state.state
+                    
+                    if last_seen_after == last_seen_before[entity_id]:
+                        # ❌ Last_seen se NEZMĚNIL = TRV neodpověděla
+                        if self._should_log_no_response_error(entity_id):
+                            _LOGGER.error(
+                                f"TRV [{self._room_name}]: {entity_id} NOT RESPONDING! "
+                                f"Last seen unchanged ({last_seen_after}). Check battery/signal."
+                            )
+                        
+                        self._reliability_tracker.command_failed(
+                            entity_id,
+                            expected={"hvac_mode": mode, "temperature": temp},
+                            actual={"last_seen": last_seen_after},
+                            reason=FAILURE_REASON_NO_RESPONSE
+                        )
+                        continue
+                    else:
+                        # ✅ Last_seen se změnil = TRV odpověděla
+                        _LOGGER.debug(
+                            f"TRV [{self._room_name}]: {entity_id} responded "
+                            f"(last_seen: {last_seen_before[entity_id]} → {last_seen_after})"
+                        )
+            
+            # Existing temperature/mode verification...
+            if not temp_ok:
+                # CRITICAL ERROR - temperature mismatch!
+                _LOGGER.error(
+                    f"TRV [{self._room_name}]: {entity_id} FAILED to apply temperature! "
+                    f"Expected: {temp}°C, Got: {actual_temp}°C - Command likely lost due to weak signal"
+                )
+                self._reliability_tracker.command_failed(
+                    entity_id,
+                    expected={"hvac_mode": mode, "temperature": temp},
+                    actual={"hvac_mode": actual_mode, "temperature": actual_temp},
+                    reason=FAILURE_REASON_TEMP_MISMATCH
+                )
+            elif actual_mode != mode:
+                # WARNING - mode mismatch but temperature OK (TRV preference)
+                _LOGGER.warning(
+                    f"TRV [{self._room_name}]: {entity_id} mode differs (expected: {mode}, got: {actual_mode}) "
+                    f"but temperature is correct ({actual_temp}°C) - TRV prefers {actual_mode} mode"
+                )
+                self._reliability_tracker.mode_mismatch(
+                    entity_id,
+                    expected_mode=mode,
+                    actual_mode=actual_mode,
+                    temperature=actual_temp
+                )
+            else:
+                _LOGGER.debug(
+                    f"TRV [{self._room_name}]: {entity_id} verified OK ({actual_mode}/{actual_temp}°C)"
+                )
 
     async def _verify_trv_state(self):
         """Pravidelná kontrola, zda TRV odpovídají očekávanému stavu."""
@@ -1105,12 +1158,17 @@ class RoomController:
                     {"entity_id": entity_id, "temperature": expected_temp},
                     blocking=True,
                 )
-            elif actual_mode != expected_mode:
-                # Mode mismatch but temperature OK - just DEBUG log
-                _LOGGER.debug(
-                    f"TRV [{self._room_name}]: {entity_id} in {actual_mode} mode "
-                    f"(expected {expected_mode}) but temperature correct ({actual_temp}°C)"
-                )
+
+    def _should_log_no_response_error(self, entity_id: str) -> bool:
+        """Rozhodnout jestli logovat NO_RESPONSE ERROR (max 1x/30min)."""
+        now = time.time()
+        last_log = self._last_no_response_error_log.get(entity_id, 0)
+        
+        if now - last_log < ERROR_LOG_RATE_LIMIT:
+            return False  # Skip
+        
+        self._last_no_response_error_log[entity_id] = now
+        return True  # Log
 
     def _get_temperature(self) -> Optional[float]:
         """Načíst aktuální teplotu."""
