@@ -265,6 +265,123 @@ Integrace vytváří následující sensory pro každou místnost:
 
 ---
 
+## 🆕 🔔 Communication Problem Binary Sensor (v3.0.25+)
+
+### Binary Sensor (`binary_sensor.trv_regulator_{room}_communication_problem`)
+
+**State:** `on` / `off`
+
+**Kdy je ON:**
+- Poslední příkaz k TRV **SELHAL** (last_seen se nezměnil)
+- Detekuje:
+  - TRV offline (vybité baterie)
+  - Slabý Zigbee signál
+  - Fyzicky rozbitá hlavice
+  - TRV zamrzlá v zapnutém/vypnutém stavu
+
+**Kdy je OFF:**
+- Poslední příkaz **USPĚL** (last_seen se změnil)
+- Automatický reset při úspěchu
+
+**Atributy:**
+```yaml
+problem_trvs:
+  - entity_id: climate.hlavice_loznice
+    last_failure_time: "2026-02-05T20:10:15"
+    last_failure_reason: "no_response"
+total_problem_trvs: 1
+total_failures_24h: 5
+```
+
+**Filosofie:**
+- ✅ **Jednoduchý** - jen ON/OFF (ne thresholdy)
+- ✅ **Deterministický** - jasný stav
+- ✅ **Flexibilní** - uživatel si vytvoří vlastní automatizace
+
+**Use case:**
+```yaml
+# Jednoduchá notifikace
+automation:
+  - alias: "TRV - Komunikační problém"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.trv_regulator_loznice_communication_problem
+        to: "on"
+    action:
+      - service: notify.mobile_app
+        data:
+          title: "⚠️ TRV Problém"
+          message: "Zkontroluj baterie/signál"
+
+# Pokročilá detekce přehřátí
+automation:
+  - alias: "TRV - Detekce zamrzlé hlavice"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.trv_regulator_loznice_communication_problem
+        to: "on"
+        for: "00:05:00"
+    condition:
+      # Teplota roste (hlavice zamrzlá v ON)
+      - condition: template
+        value_template: >
+          {% set current = states('sensor.teplota_loznice') | float %}
+          {% set target = states('sensor.loznice_pozadovana') | float %}
+          {{ current > target + 1.0 }}
+    action:
+      - service: notify.mobile_app
+        data:
+          title: "🔥 TRV zamrzlá v ON!"
+          message: "Teplota roste navzdory příkazům"
+```
+
+---
+
+## ⚠️ CRITICAL: Last_seen Sensor Requirements
+
+**DŮLEŽITÉ:** Last_seen sensor MUSÍ být typu "FROM device", ne "TO device"!
+
+### Zigbee2MQTT konfigurace:
+
+```yaml
+# Zigbee2MQTT configuration.yaml
+advanced:
+  elapsed: true  # ← CRITICAL! Povinné pro správnou detekci
+```
+
+**Co dělá `elapsed: true`:**
+- Last_seen = timestamp posledního **PŘIJATÉHO** reportu od TRV
+- Změní se POUZE když TRV aktivně reportuje
+- ✅ Použitelné pro detekci offline hlavic
+
+**Co dělá `elapsed: false` (ŠPATNĚ!):**
+- Last_seen = timestamp **ODESLANÉHO** příkazu
+- Změní se i když TRV neodpověděla
+- ❌ NEPOUŽITELNÉ pro detekci!
+
+### Testování:
+
+```
+1. Zjisti aktuální last_seen timestamp
+2. Odpoj TRV z dosahu (nebo vypni baterie)
+3. Pošli příkaz přes HA
+4. Zkontroluj last_seen:
+   ✅ Správně: last_seen se NEZMĚNIL (TRV neodpověděla)
+   ❌ Špatně: last_seen se změnil (detekce nefunguje!)
+```
+
+**Pokud máš `elapsed: false`:**
+- Nastav na `true` v Zigbee2MQTT konfiguraci
+- Restart Zigbee2MQTT
+- Znovu nakonfiguruj last_seen senzory v integraci
+
+**Alternativy (pokud last_seen není dostupný):**
+- Použij `linkquality` sensor (reportuje TRV)
+- Použij `battery` sensor (reportuje TRV)
+- Monitoring jejich `last_updated` timestamp
+
+---
+
 ## 🤖 Stavový automat místnosti
 
 ### Stavy

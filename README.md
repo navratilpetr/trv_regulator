@@ -150,6 +150,10 @@ Pro každou místnost:
 - **`sensor.trv_regulator_{room}_stats`** - Statistiky (průměry, úspěšnost)
 - **`sensor.trv_regulator_{room}_diagnostics`** - Stav komponent (diagnostic entity)
 - **`sensor.trv_regulator_{room}_reliability`** - Spolehlivost komunikace s TRV
+- **`binary_sensor.trv_regulator_{room}_communication_problem`** - Detekce komunikačních problémů
+  - `on` = poslední příkaz selhal (TRV neodpovídá)
+  - `off` = poslední příkaz úspěšný
+  - Automatický reset při obnovení komunikace
 
 Pro celou integraci:
 - **`sensor.trv_regulator_summary`** - Přehled všech místností
@@ -213,6 +217,82 @@ Viz složka `examples/` pro ready-to-use Lovelace konfigurace:
 - Ověř zdraví Zigbee sítě
 - Zkontroluj baterie v TRV
 - Zvaž přemístění Zigbee routerů
+
+## 🔔 Automatizace pro alerting
+
+### Jednoduchá notifikace při problému:
+
+```yaml
+automation:
+  - alias: "TRV - Upozornění na komunikační problém"
+    trigger:
+      - platform: state
+        entity_id: 
+          - binary_sensor.trv_regulator_loznice_communication_problem
+          - binary_sensor.trv_regulator_obyvak_communication_problem
+        to: "on"
+    action:
+      - service: notify.mobile_app_your_phone
+        data:
+          title: "⚠️ TRV Komunikační problém"
+          message: >
+            Místnost: {{ trigger.to_state.attributes.friendly_name }}
+            Zkontroluj baterie nebo Zigbee signál!
+```
+
+### Pokročilá detekce přehřátí (zamrzlá hlavice):
+
+```yaml
+automation:
+  - alias: "TRV - Detekce zamrzlé hlavice"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.trv_regulator_loznice_communication_problem
+        to: "on"
+        for: "00:05:00"  # 5 minut v ERROR
+    condition:
+      # Teplota roste navzdory příkazům vypnout
+      - condition: template
+        value_template: >
+          {% set current = states('sensor.teplota_loznice_temperature') | float %}
+          {% set target = states('sensor.loznice_pozadovana') | float %}
+          {{ current > target + 1.0 }}
+    action:
+      - service: notify.mobile_app_your_phone
+        data:
+          title: "🔥 TRV Ložnice - PŘEHŘÁTÍ!"
+          message: >
+            Teplota: {{ states('sensor.teplota_loznice_temperature') }}°C
+            Target: {{ states('sensor.loznice_pozadovana') }}°C
+            TRV pravděpodobně zamrzlá v zapnutém stavu!
+          data:
+            priority: high
+```
+
+### Detekce slabého signálu:
+
+```yaml
+automation:
+  - alias: "TRV - Opakované problémy = slabý signál"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.trv_regulator_loznice_communication_problem
+        to: "on"
+    condition:
+      # Více než 5 selhání za 24h
+      - condition: template
+        value_template: >
+          {{ state_attr('binary_sensor.trv_regulator_loznice_communication_problem', 'total_failures_24h') | int > 5 }}
+    action:
+      - service: notify.mobile_app_your_phone
+        data:
+          title: "📶 TRV Ložnice - Slabý signál"
+          message: >
+            Počet selhání za 24h: {{ state_attr('binary_sensor.trv_regulator_loznice_communication_problem', 'total_failures_24h') }}
+            Doporučení: Přidej Zigbee router poblíž ložnice
+```
+
+**CRITICAL:** Ujisti se že máš v Zigbee2MQTT `elapsed: true` (viz PROMPT.md dokumentace).
 
 ## ⚙️ Rychlost reakce
 

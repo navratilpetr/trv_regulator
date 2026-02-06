@@ -7,6 +7,40 @@ a projekt dodržuje [sémantické verzování](https://semver.org/lang/cs/).
 
 ## [Unreleased]
 
+## [3.0.25] - 2026-02-06
+
+### Přidáno
+- 🔔 **Binary sensor pro komunikační problémy**
+  - `binary_sensor.trv_regulator_{room}_communication_problem`
+  - ON = poslední příkaz selhal (last_seen unchanged)
+  - OFF = poslední příkaz úspěšný (last_seen changed)
+  - Automatický reset při obnovení komunikace
+  - Atributy: problem_trvs, last_failure_time, last_failure_reason, total_failures_24h
+
+### Rozšířeno
+- 🔍 **Watchdog last_seen monitoring**
+  - Watchdog korekce nyní kontrolují last_seen po odeslání příkazu
+  - Detekuje i když TRV zamrzne v zapnutém/vypnutém stavu
+  - Rychlá detekce problémů (15s po korekci)
+
+- 📊 **Reliability tracker**
+  - Přidán flag `last_command_failed` (binary status)
+  - Nová metoda `command_succeeded()` pro reset při úspěchu
+  - Helper metoda `get_failed_commands_24h()`
+  - Přidána podpora pro `no_response` failure reason
+
+### Dokumentace
+- ⚠️ **CRITICAL note** o Zigbee2MQTT `elapsed: true` requirement
+  - Last_seen sensor MUSÍ být typu "FROM device"
+  - Dokumentace testování a alternativ
+  - Příklady automatizací pro alerting (detekce přehřátí, slabého signálu)
+
+### Technické detaily
+- Nová platforma `binary_sensor.py`
+- Rozšíření `reliability_tracker.py` o binary status tracking
+- Watchdog rozšířen o last_seen verification
+- Příklady pokročilých automatizací
+
 ## [3.0.24] - 2026-02-05 18:50
 
 ## [3.0.23] - 2026-02-05 17:36
