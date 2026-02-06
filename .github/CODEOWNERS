@@ -1,0 +1,11 @@
+# Critical files require review from repository owner
+
+# Version file - managed by automated workflow only
+/custom_components/trv_regulator/manifest.json @navratilpetr
+
+# Workflows - changes require explicit approval
+/.github/workflows/ @navratilpetr
+
+# Copilot instructions - important for PR quality
+/.github/copilot-instructions.md @navratilpetr
+/.github/COPILOT_CHANGELOG_RULES.md @navratilpetr

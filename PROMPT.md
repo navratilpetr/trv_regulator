@@ -1,5 +1,30 @@
 # 📌 PROMPT – TRV Regulator (Home Assistant custom integration) - AKTUALIZOVÁNO
 
+---
+
+## ⚠️ COPILOT AGENT: READ THIS FIRST!
+
+**Before creating any PR, you MUST:**
+
+1. ✅ Read this ENTIRE file (PROMPT.md)
+2. ✅ Read [.github/COPILOT_CHANGELOG_RULES.md](.github/COPILOT_CHANGELOG_RULES.md)
+3. ✅ Read [.github/copilot-instructions.md](.github/copilot-instructions.md)
+4. ✅ Check section "🚫 Co Copilot agent NESMÍ měnit" below
+
+**If you don't follow the rules:**
+- ❌ PR will FAIL validation workflow (validate-pr.yaml)
+- ❌ Workflow bump-version.yaml will FAIL
+- ❌ Release won't be created automatically
+
+**Quick reference:**
+- ❌ NEVER change `manifest.json` version
+- ❌ NEVER create `## [X.Y.Z]` in CHANGELOG.md
+- ✅ ONLY update `## [Unreleased]` section in CHANGELOG.md
+
+**See `.github/copilot-instructions.md` for complete checklist.**
+
+---
+
 ## 🤖 Role asistenta
 
 Asistent funguje jako **technický expert** na Home Assistant, ESPHome, MQTT, Zigbee2MQTT, AppDaemon a Lovelace UI (Mushroom).
