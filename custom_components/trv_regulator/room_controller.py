@@ -1118,6 +1118,8 @@ class RoomController:
                             f"TRV [{self._room_name}]: {entity_id} responded "
                             f"(last_seen: {last_seen_before[entity_id]} → {last_seen_after})"
                         )
+                        # Mark as succeeded
+                        self._reliability_tracker.command_succeeded(entity_id)
             
             # Existing temperature/mode verification...
             if not temp_ok:
@@ -1184,6 +1186,15 @@ class RoomController:
                     f"Expected: {expected_temp}°C, Actual: {actual_temp}°C (mode: {actual_mode}) - CORRECTING NOW"
                 )
                 
+                # 🆕 Zaznamenat last_seen PŘED korekcí
+                last_seen_before = None
+                last_seen_sensor = trv_config.get("last_seen_sensor")
+                
+                if last_seen_sensor:
+                    sensor_state = self._hass.states.get(last_seen_sensor)
+                    if sensor_state and sensor_state.state not in ("unavailable", "unknown"):
+                        last_seen_before = sensor_state.state
+                
                 # Track watchdog correction
                 self._reliability_tracker.watchdog_correction(
                     entity_id,
@@ -1206,6 +1217,34 @@ class RoomController:
                     {"entity_id": entity_id, "temperature": expected_temp},
                     blocking=True,
                 )
+                
+                # 🆕 Počkat a zkontrolovat last_seen
+                if last_seen_before:
+                    await asyncio.sleep(TRV_COMMAND_VERIFY_DELAY)
+                    
+                    sensor_state = self._hass.states.get(last_seen_sensor)
+                    if sensor_state and sensor_state.state not in ("unavailable", "unknown"):
+                        last_seen_after = sensor_state.state
+                        
+                        if last_seen_after == last_seen_before:
+                            # ❌ Last_seen NEZMĚNĚN - TRV neodpověděla na korekci
+                            _LOGGER.warning(
+                                f"TRV [{self._room_name}]: {entity_id} did NOT respond to "
+                                f"watchdog correction (last_seen unchanged)"
+                            )
+                            self._reliability_tracker.command_failed(
+                                entity_id,
+                                expected={"hvac_mode": expected_mode, "temperature": expected_temp},
+                                actual={"last_seen": last_seen_after},
+                                reason=FAILURE_REASON_NO_RESPONSE
+                            )
+                        else:
+                            # ✅ Last_seen ZMĚNĚN - TRV odpověděla
+                            _LOGGER.debug(
+                                f"TRV [{self._room_name}]: {entity_id} responded to "
+                                f"watchdog correction"
+                            )
+                            self._reliability_tracker.command_succeeded(entity_id)
 
     def _should_log_no_response_error(self, entity_id: str) -> bool:
         """Rozhodnout jestli logovat NO_RESPONSE ERROR (max 1x/30min)."""

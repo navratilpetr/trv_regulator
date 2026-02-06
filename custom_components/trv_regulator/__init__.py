@@ -224,7 +224,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
     # Forward setup pro sensor platform
-    await hass.config_entries.async_forward_entry_setups(entry, ["sensor"])
+    await hass.config_entries.async_forward_entry_setups(entry, ["sensor", "binary_sensor"])
 
     # Registrovat service pro reset naučených parametrů
     async def handle_reset_learned_params(call):
@@ -280,8 +280,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Odinstalace integrace."""
-    # Unload sensor platform
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, ["sensor"])
+    # Unload sensor and binary_sensor platforms
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, ["sensor", "binary_sensor"])
     
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)

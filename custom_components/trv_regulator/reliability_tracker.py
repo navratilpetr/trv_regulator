@@ -27,6 +27,15 @@ class ReliabilityTracker:
         self._per_trv_mode_mismatches = defaultdict(int)  # NEW!
         self._per_trv_preferred_mode = {}  # NEW!
         
+        # Per-TRV detailed statistics (v3.0.25+)
+        self._trv_stats = defaultdict(lambda: {
+            "commands_sent": 0,
+            "commands_failed": 0,
+            "last_command_failed": False,  # Binary flag - poslední příkaz selhal?
+            "last_failure_time": None,     # ISO timestamp posledního selhání
+            "last_failure_reason": None,   # Důvod selhání
+        })
+        
         # Multi-window event queues with timestamps
         # Events format: {"type": "sent|failed|correction", "entity_id": str, "timestamp": float, ...}
         self._events_1h = deque(maxlen=200)
@@ -67,8 +76,8 @@ class ReliabilityTracker:
         now = datetime.now()
         timestamp = now.timestamp()
         
-        # COUNT only REAL failures (temp mismatch or offline)
-        if reason in ["temperature_mismatch", "offline"]:
+        # COUNT only REAL failures (temp mismatch, offline, no_response)
+        if reason in ["temperature_mismatch", "offline", "no_response"]:
             self._commands_failed_total += 1
             self._per_trv_failed[entity_id] += 1
             
@@ -83,6 +92,20 @@ class ReliabilityTracker:
             self._events_7d.append(event)
             self._events_30d.append(event)
         
+        # Set binary flag in _trv_stats (v3.0.25+)
+        trv_stats = self._trv_stats[entity_id]
+        was_ok_before = not trv_stats.get("last_command_failed", False)
+        trv_stats["last_command_failed"] = True
+        trv_stats["last_failure_time"] = now.isoformat()
+        trv_stats["last_failure_reason"] = reason
+        trv_stats["commands_failed"] += 1
+        
+        # Log status change
+        if was_ok_before:
+            _LOGGER.warning(
+                f"Reliability [{self._room_name}]: {entity_id} - Communication problem detected"
+            )
+        
         # Add to command history (all types)
         self._command_history.append({
             "timestamp": now.isoformat(),
@@ -92,6 +115,23 @@ class ReliabilityTracker:
             "actual_state": actual,
             "reason": reason,
         })
+
+    def command_succeeded(self, entity_id: str):
+        """Zaznamená úspěšný příkaz (last_seen changed)."""
+        trv_stats = self._trv_stats.get(entity_id)
+        if not trv_stats:
+            return
+        
+        # Clear binary flag
+        was_error_before = trv_stats.get("last_command_failed", False)
+        trv_stats["last_command_failed"] = False
+        trv_stats["commands_sent"] += 1
+        
+        # Log recovery
+        if was_error_before:
+            _LOGGER.info(
+                f"Reliability [{self._room_name}]: {entity_id} - Communication recovered"
+            )
 
     def watchdog_correction(self, entity_id: str, expected: dict, found: dict, reason: Optional[str] = None):
         """Track watchdog correction."""
@@ -295,6 +335,10 @@ class ReliabilityTracker:
                 "avg_reliability_rate": round(avg_reliability, 1),
             })
 
+    def get_failed_commands_24h(self) -> int:
+        """Vrací počet selhání za 24h přes všechny TRV v místnosti."""
+        return self._count_events_in_window(self._events_24h, "failed")
+
     def get_metrics(self) -> dict:
         """Get all current metrics."""
         # Cleanup old events
@@ -399,6 +443,8 @@ class ReliabilityTracker:
             "per_trv_mode_mismatches": dict(self._per_trv_mode_mismatches),  # NEW!
             "per_trv_preferred_mode": dict(self._per_trv_preferred_mode),  # NEW!
             
+            "trv_stats": dict(self._trv_stats),  # v3.0.25+
+            
             "events_30d": list(self._events_30d),
             
             "hourly_stats": list(self._hourly_stats),
@@ -425,6 +471,17 @@ class ReliabilityTracker:
         tracker._per_trv_last_seen = data.get("per_trv_last_seen", {})
         tracker._per_trv_mode_mismatches = defaultdict(int, data.get("per_trv_mode_mismatches", {}))  # NEW!
         tracker._per_trv_preferred_mode = dict(data.get("per_trv_preferred_mode", {}))  # NEW!
+        
+        # Restore trv_stats (v3.0.25+)
+        trv_stats_data = data.get("trv_stats", {})
+        if trv_stats_data:
+            tracker._trv_stats = defaultdict(lambda: {
+                "commands_sent": 0,
+                "commands_failed": 0,
+                "last_command_failed": False,
+                "last_failure_time": None,
+                "last_failure_reason": None,
+            }, trv_stats_data)
         
         # Restore events from 30d window and populate other windows
         events_30d = data.get("events_30d", [])
