@@ -1,0 +1,151 @@
+name: Validate PR
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Fetch main branch
+        run: |
+          git fetch origin main:main
+
+      # --------------------------------------------------
+      # 1) Check manifest.json NOT changed
+      # --------------------------------------------------
+      - name: Check manifest.json not changed
+        run: |
+          echo "🔍 Checking if manifest.json was modified..."
+          
+          if git diff --name-only main...HEAD | grep -q "custom_components/trv_regulator/manifest.json"; then
+            echo ""
+            echo "❌ ERROR: manifest.json was changed in this PR!"
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "📖 RULE: Copilot agent MUST NOT change manifest.json"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+            echo "📚 See: .github/COPILOT_CHANGELOG_RULES.md"
+            echo "📚 See: PROMPT.md - section '🚫 Co Copilot agent NESMÍ měnit'"
+            echo ""
+            echo "ℹ️  Version bump happens AUTOMATICALLY via workflow."
+            echo "ℹ️  The bump-version.yaml workflow will:"
+            echo "   1. Calculate new version from PR labels"
+            echo "   2. Update manifest.json automatically"
+            echo "   3. Create git tag and GitHub release"
+            echo ""
+            echo "🔧 To fix this PR:"
+            echo "   1. Revert changes to manifest.json"
+            echo "   2. Keep only your code changes"
+            echo "   3. Push the corrected version"
+            echo ""
+            exit 1
+          fi
+          
+          echo "✅ manifest.json not changed - OK"
+
+      # --------------------------------------------------
+      # 2) Check CHANGELOG.md format
+      # --------------------------------------------------
+      - name: Check CHANGELOG format
+        run: |
+          echo "🔍 Checking CHANGELOG.md format..."
+          
+          # Check if new version section was added (e.g., ## [3.0.25])
+          if git diff main...HEAD -- CHANGELOG.md | grep -E "^\+## \[[0-9]+\.[0-9]+\.[0-9]+\]"; then
+            echo ""
+            echo "❌ ERROR: New version section added to CHANGELOG.md!"
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "📖 RULE: ONLY update [Unreleased] section"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+            echo "📚 See: .github/COPILOT_CHANGELOG_RULES.md"
+            echo ""
+            echo "✅ Correct format:"
+            echo "   ## [Unreleased]"
+            echo "   "
+            echo "   ### Přidáno"
+            echo "   - Your new feature"
+            echo ""
+            echo "❌ Incorrect (DO NOT add new version):"
+            echo "   ## [3.0.25] - 2026-02-06"
+            echo ""
+            echo "ℹ️  The workflow will automatically:"
+            echo "   1. Move [Unreleased] content to new version"
+            echo "   2. Add timestamp"
+            echo "   3. Create empty [Unreleased] section"
+            echo ""
+            echo "🔧 To fix this PR:"
+            echo "   1. Remove the ## [X.Y.Z] - DATE line"
+            echo "   2. Keep your changes under ## [Unreleased]"
+            echo "   3. Push the corrected version"
+            echo ""
+            exit 1
+          fi
+          
+          # Check if [Unreleased] section exists
+          if git diff main...HEAD -- CHANGELOG.md | grep -q "^+"; then
+            if ! grep -q "## \[Unreleased\]" CHANGELOG.md; then
+              echo ""
+              echo "⚠️  WARNING: CHANGELOG.md changed but [Unreleased] section not found"
+              echo ""
+              echo "Make sure you have ## [Unreleased] section at the top."
+              echo ""
+            fi
+          fi
+          
+          echo "✅ CHANGELOG.md format OK"
+
+      # --------------------------------------------------
+      # 3) Check workflow files (warning only)
+      # --------------------------------------------------
+      - name: Check workflow files
+        run: |
+          echo "🔍 Checking workflow files..."
+          
+          if git diff --name-only main...HEAD | grep -q "^\.github/workflows/"; then
+            echo ""
+            echo "⚠️  WARNING: Workflow files were changed in this PR"
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Changed workflow files:"
+            git diff --name-only main...HEAD | grep "^\.github/workflows/" | sed 's/^/  - /'
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+            echo "⚠️  Make sure this was EXPLICITLY requested by the user."
+            echo ""
+            echo "📚 See: PROMPT.md - section '🚫 Co Copilot agent NESMÍ měnit'"
+            echo ""
+            echo "This is just a warning - PR can still be merged if intended."
+            echo ""
+          else
+            echo "✅ No workflow files changed"
+          fi
+
+      # --------------------------------------------------
+      # 4) Summary
+      # --------------------------------------------------
+      - name: Validation summary
+        if: success()
+        run: |
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "✅ All validations passed!"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "This PR follows Copilot guidelines:"
+          echo "  ✅ manifest.json not changed"
+          echo "  ✅ CHANGELOG.md format correct"
+          echo "  ✅ Ready for review"
+          echo ""

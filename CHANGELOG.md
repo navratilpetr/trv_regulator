@@ -7,6 +7,18 @@ a projekt dodržuje [sémantické verzování](https://semver.org/lang/cs/).
 
 ## [Unreleased]
 
+### Přidáno
+- 🛡️ **Copilot guardrails a PR validace**
+  - `.github/copilot-instructions.md` - kompletní instrukce pro Copilot agenty
+  - `.github/workflows/validate-pr.yaml` - automatická validace PR
+  - `.github/CODEOWNERS` - ochrana kritických souborů
+  - Validace kontroluje:
+    - ❌ Zamítne změny v manifest.json
+    - ❌ Zamítne nové verze v CHANGELOG.md
+    - ⚠️ Varuje před změnami v workflow souborech
+  - Rozšířena dokumentace COPILOT_CHANGELOG_RULES.md (troubleshooting)
+  - Přidáno varování do PROMPT.md
+
 ## [3.0.25] - 2026-02-06
 
 ### Přidáno
