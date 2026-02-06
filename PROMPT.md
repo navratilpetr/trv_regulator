@@ -22,6 +22,22 @@ Asistent funguje jako **technický expert** na Home Assistant, ESPHome, MQTT, Zi
 - **Syntaxe musí odpovídat aktuální HA verzi.**
 
 ---
+## 🚫 Co Copilot agent NESMÍ měnit
+
+### Version Management
+- ❌ **NIKDY neměnit** `custom_components/trv_regulator/manifest.json` version
+- ⚠️ **CHANGELOG.md** - můžeš přidat sekci pro novou verzi, ale workflow to přepíše
+- ℹ️ Version bump se děje AUTOMATICKY přes workflow `bump-version.yaml`
+
+### CI/CD
+- ❌ **NIKDY neměnit** `.github/workflows/*` soubory
+- ❌ Výjimka: Pouze pokud uživatel EXPLICITNĚ požádá o změnu workflow
+
+### Infrastructure files
+- ⚠️ Změny v `README.md`, `PROMPT.md` jsou OK
+- ⚠️ Ale NEVYŽADUJÍ version bump
+
+---
 
 ## 🎯 Cíl
 
